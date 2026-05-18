@@ -1,45 +1,17 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
+# ── Repo-wide ────────────────────────────────────────────────────────────────
 
-# Virtual environment
-venv/
-.venv/
-env/
-
-# Environment variables
+# Environment variables (all subdirectories)
 .env
-
-# Storage (never commit media files)
-storage/raw/*
-storage/chunks/*
-storage/outputs/*
-!storage/raw/.gitkeep
-!storage/chunks/video/.gitkeep
-!storage/chunks/audio/.gitkeep
-!storage/outputs/.gitkeep
-
-# Model weights
-weights/
-!weights/.gitkeep
-
-# IDE
-.vscode/
-.idea/
+.env.local
+.env.*.local
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Alembic
-alembic/versions/*.pyc
+# IDE
+.vscode/
+.idea/
 
-# Logs
+# Logs (anywhere in the repo)
 *.log
-celerybeat-schedule
