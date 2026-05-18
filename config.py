@@ -1,0 +1,43 @@
+"""
+Central configuration using pydantic-settings.
+All values are loaded from the .env file.
+Import the `settings` singleton everywhere in the project.
+Never read os.environ directly anywhere else.
+"""
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
+
+    DATABASE_URL: str
+    REDIS_URL: str
+    STORAGE_BASE: Path = Path("./storage")
+    CHUNK_DURATION_SEC: int = 30
+    MODEL_WEIGHTS_PATH: Path = Path("./weights")
+    LOG_LEVEL: str = "INFO"
+
+    @property
+    def SYNC_DATABASE_URL(self) -> str:
+        """Synchronous driver URL for Celery workers."""
+        url = self.DATABASE_URL
+        if "asyncpg" in url:
+            url = url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg2://")
+        return url
+
+    @property
+    def ASYNC_DATABASE_URL(self) -> str:
+        """Async driver URL for FastAPI endpoints."""
+        url = self.DATABASE_URL
+        if "asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://")
+        return url
+
+
+settings = Settings()

@@ -1,0 +1,31 @@
+# API
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+aiofiles==23.2.1
+
+# Task queue
+celery==5.3.6
+redis==5.0.4
+
+# Database
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+alembic==1.13.1
+asyncpg==0.29.0
+
+# Config
+pydantic==2.7.1
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+
+# ML / Media
+torch==2.3.0
+torchaudio==2.3.0
+torchvision==0.18.0
+openai-whisper==20231117
+librosa==0.10.2
+numpy==1.26.4
+opencv-python==4.9.0.80
+ffmpeg-python==0.2.0
+moviepy==1.0.3
