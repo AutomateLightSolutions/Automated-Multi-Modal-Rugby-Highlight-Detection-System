@@ -10,6 +10,7 @@ from db import SyncSessionLocal
 from db.crud import (
     sync_create_module_output,
     sync_create_segment,
+    sync_get_match,
     sync_update_highlight_job,
     sync_update_match_status,
 )
@@ -43,19 +44,17 @@ def process_match(_self, match_id: str, video_path: str):
         sync_update_match_status(session, match_id, "extracting")
 
         # c. Extract duration, fps, and full audio track
-        duration_sec, fps, full_audio_path = extract_media(
-            video_path, match_id, settings.STORAGE_BASE
-        )
+        meta = extract_media(video_path, match_id, settings.STORAGE_BASE)
 
         # d. Persist extraction metadata
         sync_update_match_status(
             session, match_id, "extracting",
-            duration_sec=duration_sec, fps=fps
+            duration_sec=meta["duration_sec"], fps=meta["fps"],
         )
 
         # e. Segment into fixed-duration chunks
         chunks = segment_match(
-            video_path, match_id, full_audio_path,
+            video_path, match_id, meta["full_audio_path"],
             settings.STORAGE_BASE, settings.CHUNK_DURATION_SEC,
         )
 
@@ -230,11 +229,20 @@ def generate_highlight(job_id: str, match_id: str, user_filter: str | None):
             )
             return
 
-        output_dir = settings.STORAGE_BASE / "outputs"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{job_id}_highlight.mp4"
+        match = sync_get_match(session, match_id)
+        original_video_path = str(
+            settings.STORAGE_BASE / "raw" / f"{match_id}_{match.filename}"
+        )
 
-        assemble_highlight(selected_segments, str(output_path))
+        output_path = settings.STORAGE_BASE / "outputs" / f"{job_id}_highlight.mp4"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        assemble_highlight(
+            selected_segments=selected_segments,
+            original_video_path=original_video_path,
+            output_path=str(output_path),
+            total_duration=match.duration_sec,
+        )
 
         sync_update_highlight_job(
             session, job_id,
