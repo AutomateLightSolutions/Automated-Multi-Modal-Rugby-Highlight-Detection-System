@@ -44,7 +44,7 @@ services:
 
   worker:
     build: ./backend
-    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=3 -Q ml,fusion,default
+    command: celery -A tasks.celery_app:app worker --loglevel=info --concurrency=3 -Q ml,fusion,default
     volumes:
       - ./backend:/app
     env_file:

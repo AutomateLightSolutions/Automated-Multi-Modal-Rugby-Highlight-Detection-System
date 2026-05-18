@@ -10,6 +10,7 @@ export const uploadMatch = (file, onProgress) => {
   form.append("file", file)
   return api.post("/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
+    timeout: 0, // no timeout — large video files can take minutes to upload
     onUploadProgress: (e) => {
       const pct = Math.round((e.loaded * 100) / e.total)
       onProgress?.(pct)
