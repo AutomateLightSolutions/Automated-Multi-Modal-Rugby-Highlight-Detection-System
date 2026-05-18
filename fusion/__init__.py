@@ -1,91 +1,107 @@
 """
-Fusion pipeline: aligns module scores, computes fused confidence, filters,
-selects top segments, persists FusionResult records, and returns selected Segments.
+Master fusion pipeline. Called by the generate_highlight Celery task.
+Loads all module outputs from DB, aligns, scores, filters, selects.
 """
-import uuid
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+import logging
+from fusion.aligner import align_module_outputs
+from fusion.scorer import compute_fused_score
+from fusion.filter import apply_user_filter
+from fusion.selector import select_segments
+from db.crud import (
+    sync_get_segments_by_match,
+    sync_get_module_outputs_by_segment,
+    sync_create_fusion_result,
+    sync_update_fusion_result,
+)
 
-from db.models import FusionResult, ModuleOutput, Segment
-
-
-_WEIGHTS = {"visual": 0.5, "commentary": 0.3, "audio_energy": 0.2}
-_CONFIDENCE_THRESHOLD = 0.4
-_MAX_SEGMENTS = 20
-
-
-def _matches_filter(event_type: str | None, user_filter: str | None) -> bool:
-    if not user_filter or not event_type:
-        return True
-    keyword = user_filter.lower().rstrip("s")  # "scrums" → "scrum"
-    return keyword in event_type.lower()
+logger = logging.getLogger(__name__)
 
 
-def _fuse_outputs(outputs: list[ModuleOutput], user_filter: str | None) -> float:
-    """Weighted mean confidence; returns -1 if the segment fails the user filter."""
-    total_weight = 0.0
-    fused = 0.0
-    for output in outputs:
-        if not _matches_filter(output.event_type, user_filter):
-            return -1.0
-        w = _WEIGHTS.get(output.module_name, 0.0)
-        fused += w * output.confidence
-        total_weight += w
-    return fused / total_weight if total_weight > 0 else -1.0
-
-
-def _load_outputs(session: Session, segment_id: uuid.UUID) -> list[ModuleOutput]:
-    return list(
-        session.execute(
-            select(ModuleOutput).where(ModuleOutput.segment_id == segment_id)
-        ).scalars()
-    )
-
-
-def _persist_results(
-    session: Session,
-    match_uuid: uuid.UUID,
-    top: list[tuple[float, Segment]],
-) -> None:
-    for rank, (fused_confidence, segment) in enumerate(top):
-        session.add(
-            FusionResult(
-                segment_id=segment.id,
-                match_id=match_uuid,
-                fused_confidence=fused_confidence,
-                selected=True,
-                rank=rank,
-            )
-        )
-    session.commit()
-
-
-def run_fusion_pipeline(
-    match_id: str,
-    user_filter: str | None,
-    session: Session,
-) -> list:
+def run_fusion_pipeline(match_id: str, user_filter: str | None,
+                         session) -> list[dict]:
     """
-    Runs weighted fusion over all module outputs for the match, selects the
-    top-scoring segments, persists FusionResult rows, and returns the ordered
-    list of selected Segment objects (chronological order).
-    """
-    match_uuid = uuid.UUID(match_id) if isinstance(match_id, str) else match_id
+    Full fusion pipeline for one match.
 
-    segments: list[Segment] = list(
-        session.execute(select(Segment).where(Segment.match_id == match_uuid)).scalars()
-    )
+    Returns:
+        List of selected segment dicts sorted chronologically.
+        Each dict contains all fields needed by assembler.py.
+    """
+    segments = sync_get_segments_by_match(session, match_id)
     if not segments:
+        logger.error("No segments found for match %s", match_id)
         return []
 
-    scored: list[tuple[float, Segment]] = []
+    all_fused = []
+
     for segment in segments:
-        fused = _fuse_outputs(_load_outputs(session, segment.id), user_filter)
-        if fused >= _CONFIDENCE_THRESHOLD:
-            scored.append((fused, segment))
+        module_outputs_db = sync_get_module_outputs_by_segment(
+            session, str(segment.id)
+        )
 
-    top = sorted(scored, key=lambda x: x[0], reverse=True)[:_MAX_SEGMENTS]
-    _persist_results(session, match_uuid, top)
+        if not module_outputs_db:
+            logger.warning("Segment %s has no module outputs. Skipping.", segment.id)
+            continue
 
-    return [seg for _, seg in sorted(top, key=lambda x: x[1].global_start_sec)]
+        # Convert DB objects to dicts matching module contract
+        output_dicts = [
+            {
+                "module": mo.module_name,
+                "global_start_sec": segment.global_start_sec,
+                "global_end_sec": segment.global_end_sec,
+                "confidence": mo.confidence,
+                "event_type": mo.event_type,
+                "event_confidence": mo.event_confidence,
+            }
+            for mo in module_outputs_db
+        ]
+
+        # Align and validate timestamps
+        try:
+            aligned = align_module_outputs(str(segment.id), output_dicts)
+        except ValueError:
+            logger.exception("Alignment failed for segment %s", segment.id)
+            continue
+
+        # Compute fused score
+        fused_score = compute_fused_score(aligned)
+
+        # Persist fusion result (not yet selected; rank assigned after NMS)
+        sync_create_fusion_result(
+            session,
+            segment_id=str(segment.id),
+            match_id=match_id,
+            fused_confidence=fused_score,
+            selected=False,
+            rank=None,
+        )
+
+        # Get visual event data for filtering and downstream use
+        visual_out = aligned.get("visual", {})
+
+        all_fused.append({
+            "segment_id": str(segment.id),
+            "global_start_sec": segment.global_start_sec,
+            "global_end_sec": segment.global_end_sec,
+            "video_chunk_path": segment.video_chunk_path,
+            "fused_confidence": fused_score,
+            "visual_event_type": visual_out.get("event_type"),
+            "visual_event_confidence": visual_out.get("event_confidence"),
+        })
+
+    # Apply user filter
+    filtered = apply_user_filter(all_fused, user_filter)
+
+    # NMS selection
+    selected = select_segments(filtered, top_n=10, min_gap_sec=5.0)
+
+    # Mark selected segments in DB with their rank
+    for seg in selected:
+        sync_update_fusion_result(
+            session,
+            seg["segment_id"],
+            selected=True,
+            rank=seg["rank"],
+        )
+
+    return selected

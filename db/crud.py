@@ -83,6 +83,41 @@ def sync_update_highlight_job(session: Session, job_id: str, **kwargs) -> None:
         session.commit()
 
 
+def sync_get_segments_by_match(session: Session, match_id: str) -> list:
+    return list(
+        session.execute(
+            select(Segment).where(Segment.match_id == uuid.UUID(match_id))
+        ).scalars()
+    )
+
+
+def sync_get_module_outputs_by_segment(session: Session, segment_id: str) -> list:
+    return list(
+        session.execute(
+            select(ModuleOutput).where(
+                ModuleOutput.segment_id == uuid.UUID(segment_id)
+            )
+        ).scalars()
+    )
+
+
+def sync_update_fusion_result(
+    session: Session,
+    segment_id: str,
+    selected: bool,
+    rank: int | None,
+) -> None:
+    result = session.execute(
+        select(FusionResult).where(
+            FusionResult.segment_id == uuid.UUID(segment_id)
+        )
+    ).scalar_one_or_none()
+    if result:
+        result.selected = selected
+        result.rank = rank
+        session.commit()
+
+
 def sync_create_fusion_result(
     session: Session,
     segment_id: str,
