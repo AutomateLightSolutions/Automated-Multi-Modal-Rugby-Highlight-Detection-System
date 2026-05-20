@@ -110,6 +110,16 @@ export default function MatchesPage() {
     setShowUploadDrawer(false)
   }
 
+  const handleStatusChange = (matchId, status) => {
+    setMatches((prev) => {
+      const updated = prev.map((m) =>
+        m.match_id === matchId ? { ...m, status } : m
+      )
+      saveMatches(updated)
+      return updated
+    })
+  }
+
   const handleJobCreated = (jobId) => {
     setActiveJobId(jobId)
   }
@@ -141,7 +151,11 @@ export default function MatchesPage() {
                   exit={{ opacity: 0, y: -12 }}
                   className="space-y-6"
                 >
-                  <MatchStatusCard matchId={selectedId} onJobCreated={handleJobCreated} />
+                  <MatchStatusCard
+                    matchId={selectedId}
+                    onJobCreated={handleJobCreated}
+                    onStatusChange={(status) => handleStatusChange(selectedId, status)}
+                  />
                   {activeJobId && <JobStatusCard jobId={activeJobId} />}
                 </motion.div>
               </AnimatePresence>

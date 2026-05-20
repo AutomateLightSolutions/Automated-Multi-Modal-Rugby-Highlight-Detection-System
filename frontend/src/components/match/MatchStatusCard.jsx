@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { CheckCircle, Zap, Loader2, AlertCircle } from "lucide-react"
+import { CheckCircle, Zap, Loader2, AlertCircle, XCircle } from "lucide-react"
 import toast from "react-hot-toast"
 import { useMatchPolling } from "../../hooks/useMatchPolling"
 import { generateHighlight } from "../../lib/api"
@@ -18,20 +18,30 @@ const STAGES = [
 const STAGE_ORDER = { uploaded: 0, extracting: 1, processing: 2, done: 3 }
 
 function PipelineStepper({ status }) {
+  const isFailed = status === "failed"
   const current = STAGE_ORDER[status] ?? 0
+
   return (
     <div className="flex items-center gap-2">
       {STAGES.map((stage, i) => {
         const done = i < current
-        const active = i === current
+        const active = i === current && !isFailed
         const future = i > current
         return (
           <div key={stage.key} className="flex items-center">
             <div className="flex flex-col items-center gap-1">
               <div className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300
-                ${done ? "bg-accent-emerald" : active ? "bg-accent-indigo" : "bg-bg-tertiary border border-border"}`}
+                ${isFailed
+                  ? "bg-red-500/20 border border-red-500/40"
+                  : done
+                    ? "bg-accent-emerald"
+                    : active
+                      ? "bg-accent-indigo"
+                      : "bg-bg-tertiary border border-border"}`}
               >
-                {done ? (
+                {isFailed ? (
+                  <XCircle size={14} className="text-red-400" />
+                ) : done ? (
                   <CheckCircle size={14} className="text-white" />
                 ) : active ? (
                   <>
@@ -43,13 +53,15 @@ function PipelineStepper({ status }) {
                 )}
               </div>
               <span className={`text-[10px] font-medium whitespace-nowrap ${
-                active ? "text-accent-indigo" : done ? "text-accent-emerald" : "text-text-muted"
+                isFailed ? "text-red-400" : active ? "text-accent-indigo" : done ? "text-accent-emerald" : "text-text-muted"
               }`}>
                 {stage.label}
               </span>
             </div>
             {i < STAGES.length - 1 && (
-              <div className={`w-8 h-0.5 mb-4 mx-1 transition-colors duration-300 ${i < current ? "bg-accent-emerald" : "bg-border"}`} />
+              <div className={`w-8 h-0.5 mb-4 mx-1 transition-colors duration-300 ${
+                isFailed ? "bg-red-500/20" : i < current ? "bg-accent-emerald" : "bg-border"
+              }`} />
             )}
           </div>
         )
@@ -58,10 +70,14 @@ function PipelineStepper({ status }) {
   )
 }
 
-export default function MatchStatusCard({ matchId, onJobCreated }) {
+export default function MatchStatusCard({ matchId, onJobCreated, onStatusChange }) {
   const { data, isLoading, isError } = useMatchPolling(matchId)
   const [filter, setFilter] = useState("")
   const [generating, setGenerating] = useState(false)
+
+  useEffect(() => {
+    if (data?.status) onStatusChange?.(data.status)
+  }, [data?.status, onStatusChange])
 
   const handleGenerate = async () => {
     setGenerating(true)

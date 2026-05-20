@@ -31,6 +31,8 @@ app.conf.update(
     enable_utc=True,
     task_track_started=True,
     broker_connection_retry_on_startup=True,
+    task_soft_time_limit=3300,  # raise SoftTimeLimitExceeded at 55 min → task can mark match as failed
+    task_time_limit=3600,       # hard kill at 60 min if soft limit was ignored
     task_routes={
         "tasks.tasks.run_visual_module":       {"queue": "ml"},
         "tasks.tasks.run_commentary_module":   {"queue": "ml"},
