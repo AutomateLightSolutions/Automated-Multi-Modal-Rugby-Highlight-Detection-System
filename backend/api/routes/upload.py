@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas import MatchStatusResponse, MatchUploadResponse
 from config import settings
 from db import AsyncSessionLocal
-from db.crud import async_create_match, async_get_match
+from db.crud import async_create_match, async_delete_match, async_get_match
 
 router = APIRouter()
 
@@ -60,6 +60,41 @@ async def upload_match(
             f"Poll /api/v1/matches/{match_id}/status to track progress."
         ),
     )
+
+
+@router.delete("/matches/{match_id}", status_code=200)
+async def delete_match(
+    match_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    match = await async_get_match(session, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail=f"Match {match_id} not found.")
+
+    if match.status in ("extracting", "processing"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete a match that is currently {match.status}. "
+                   "Wait for it to complete or fail first.",
+        )
+
+    filename = match.filename
+
+    file_paths = await async_delete_match(session, match_id)
+
+    # Raw video and full audio are not stored in segment records — reconstruct paths
+    file_paths += [
+        str(settings.STORAGE_BASE / "raw" / f"{match_id}_{filename}"),
+        str(settings.STORAGE_BASE / "audio" / f"{match_id}_full.wav"),
+    ]
+
+    for path_str in file_paths:
+        try:
+            Path(path_str).unlink(missing_ok=True)
+        except OSError:
+            pass  # best-effort; don't fail the request over a missing file
+
+    return {"deleted": True, "match_id": str(match_id)}
 
 
 @router.get("/matches/{match_id}/status", response_model=MatchStatusResponse)

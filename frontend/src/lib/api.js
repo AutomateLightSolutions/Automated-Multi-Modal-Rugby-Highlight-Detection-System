@@ -21,6 +21,9 @@ export const uploadMatch = (file, onProgress) => {
 export const getMatchStatus = (matchId) =>
   api.get(`/matches/${matchId}/status`)
 
+export const deleteMatch = (matchId) =>
+  api.delete(`/matches/${matchId}`)
+
 export const generateHighlight = (matchId, userFilter = null) =>
   api.post("/highlights/generate", {
     match_id: matchId,

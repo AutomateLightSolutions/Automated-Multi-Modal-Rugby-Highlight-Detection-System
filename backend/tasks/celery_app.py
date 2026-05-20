@@ -5,10 +5,12 @@ import sys
 from pathlib import Path
 
 # Ensure backend/ is on sys.path so sibling packages (pipeline, modules, etc.)
-# are importable however Celery is invoked.
-_backend_dir = str(Path(__file__).resolve().parent.parent)
-if _backend_dir not in sys.path:
-    sys.path.insert(0, _backend_dir)
+# are importable however Celery is invoked (script vs python -m).
+_backend_dir = Path(__file__).resolve().parent.parent
+_backend_str = str(_backend_dir)
+_resolved = [str(Path(p).resolve()) for p in sys.path if p]
+if _backend_str not in _resolved:
+    sys.path.insert(0, _backend_str)
 
 from celery import Celery
 

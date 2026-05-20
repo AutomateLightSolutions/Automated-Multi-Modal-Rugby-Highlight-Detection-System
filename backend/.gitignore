@@ -25,10 +25,12 @@ htmlcov/
 storage/raw/*
 storage/chunks/*
 storage/outputs/*
+storage/audio/*
 !storage/raw/.gitkeep
 !storage/chunks/video/.gitkeep
 !storage/chunks/audio/.gitkeep
 !storage/outputs/.gitkeep
+!storage/audio/.gitkeep
 
 # ── Model weights ─────────────────────────────────────────────────────────────
 weights/

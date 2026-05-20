@@ -173,6 +173,33 @@ async def async_get_highlight_job(
     return await session.get(HighlightJob, job_id)
 
 
+async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list[str]:
+    """Delete match and all cascaded records. Returns file paths to clean up from disk."""
+    from sqlalchemy.orm import selectinload
+
+    match = await session.get(
+        Match,
+        match_id,
+        options=[selectinload(Match.segments), selectinload(Match.highlight_jobs)],
+    )
+    if not match:
+        return []
+
+    file_paths: list[str] = []
+    for seg in match.segments:
+        if seg.video_chunk_path:
+            file_paths.append(seg.video_chunk_path)
+        if seg.audio_chunk_path:
+            file_paths.append(seg.audio_chunk_path)
+    for job in match.highlight_jobs:
+        if job.output_path:
+            file_paths.append(job.output_path)
+
+    await session.delete(match)
+    await session.commit()
+    return file_paths
+
+
 async def async_get_selected_fusion_results(
     session: AsyncSession, match_id: uuid.UUID
 ) -> list[dict]:

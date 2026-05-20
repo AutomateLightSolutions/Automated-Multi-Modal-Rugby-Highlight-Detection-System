@@ -2,12 +2,14 @@ import { useState, useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { ListVideo, X } from "lucide-react"
+import toast from "react-hot-toast"
 import PageWrapper from "../components/layout/PageWrapper"
 import Sidebar from "../components/layout/Sidebar"
 import MatchStatusCard from "../components/match/MatchStatusCard"
 import JobStatusCard from "../components/match/JobStatusCard"
 import EmptyState from "../components/ui/EmptyState"
 import UploadZone from "../components/upload/UploadZone"
+import { deleteMatch } from "../lib/api"
 
 const STORAGE_KEY = "hl_matches"
 
@@ -29,6 +31,8 @@ export default function MatchesPage() {
   const [selectedId, setSelectedId] = useState(null)
   const [activeJobId, setActiveJobId] = useState(null)
   const [showUploadDrawer, setShowUploadDrawer] = useState(false)
+  const [deleteIds, setDeleteIds] = useState(new Set())
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const detailRef = useRef(null)
 
   useEffect(() => {
@@ -41,7 +45,7 @@ export default function MatchesPage() {
 
   const addMatch = (matchId, filename) => {
     setMatches((prev) => {
-      if (prev.find((m) => m.match_id === matchId)) return prev
+      if (prev.some((m) => m.match_id === matchId)) return prev
       const updated = [
         { match_id: matchId, filename: filename ?? matchId, status: "uploaded", uploadedAt: new Date().toISOString() },
         ...prev,
@@ -55,6 +59,48 @@ export default function MatchesPage() {
     setSelectedId(id)
     setActiveJobId(null)
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
+  }
+
+  const handleToggleDelete = (matchId) => {
+    setDeleteIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(matchId)) next.delete(matchId)
+      else next.add(matchId)
+      return next
+    })
+  }
+
+  const handleDeleteConfirm = async () => {
+    setDeleteLoading(true)
+    const ids = [...deleteIds]
+    const results = await Promise.allSettled(ids.map((id) => deleteMatch(id)))
+
+    const succeeded = []
+    const failed = []
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") succeeded.push(ids[i])
+      else failed.push(ids[i])
+    })
+
+    if (succeeded.length > 0) {
+      setMatches((prev) => {
+        const updated = prev.filter((m) => !succeeded.includes(m.match_id))
+        saveMatches(updated)
+        return updated
+      })
+      if (succeeded.includes(selectedId)) {
+        setSelectedId(null)
+        setActiveJobId(null)
+      }
+      toast.success(`Deleted ${succeeded.length} match${succeeded.length > 1 ? "es" : ""}`)
+    }
+
+    if (failed.length > 0) {
+      toast.error(`${failed.length} match${failed.length > 1 ? "es" : ""} could not be deleted (may still be processing)`)
+    }
+
+    setDeleteIds(new Set())
+    setDeleteLoading(false)
   }
 
   const handleUploadSuccess = (matchId, filename) => {
@@ -78,18 +124,15 @@ export default function MatchesPage() {
               selectedId={selectedId}
               onSelect={handleSelect}
               onUploadClick={() => setShowUploadDrawer(true)}
+              deleteIds={deleteIds}
+              onToggleDelete={handleToggleDelete}
+              onDeleteConfirm={handleDeleteConfirm}
+              deleteLoading={deleteLoading}
             />
           </div>
 
           <main ref={detailRef} className="flex-1 min-w-0 space-y-6">
-            {!selectedId ? (
-              <EmptyState
-                icon={ListVideo}
-                title="No match selected"
-                description="Select a match from the sidebar or upload a new one to get started."
-                action={{ label: "Upload Match", onClick: () => setShowUploadDrawer(true) }}
-              />
-            ) : (
+            {selectedId ? (
               <AnimatePresence mode="wait">
                 <motion.div
                   key={selectedId}
@@ -102,6 +145,13 @@ export default function MatchesPage() {
                   {activeJobId && <JobStatusCard jobId={activeJobId} />}
                 </motion.div>
               </AnimatePresence>
+            ) : (
+              <EmptyState
+                icon={ListVideo}
+                title="No match selected"
+                description="Select a match from the sidebar or upload a new one to get started."
+                action={{ label: "Upload Match", onClick: () => setShowUploadDrawer(true) }}
+              />
             )}
           </main>
         </div>
