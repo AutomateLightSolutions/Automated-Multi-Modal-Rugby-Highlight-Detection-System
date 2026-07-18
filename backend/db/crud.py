@@ -177,11 +177,17 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
     """Delete match and all cascaded records. Returns file paths to clean up from disk."""
     from sqlalchemy.orm import selectinload
 
-    match = await session.get(
-        Match,
-        match_id,
-        options=[selectinload(Match.segments), selectinload(Match.highlight_jobs)],
+    result = await session.execute(
+        select(Match)
+        .options(
+            selectinload(Match.segments).selectinload(Segment.module_outputs),
+            selectinload(Match.segments).selectinload(Segment.fusion_results),
+            selectinload(Match.highlight_jobs),
+            selectinload(Match.fusion_results),
+        )
+        .where(Match.id == match_id)
     )
+    match = result.scalar_one_or_none()
     if not match:
         return []
 

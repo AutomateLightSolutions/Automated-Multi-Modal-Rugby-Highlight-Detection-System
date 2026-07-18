@@ -26,11 +26,13 @@ storage/raw/*
 storage/chunks/*
 storage/outputs/*
 storage/audio/*
+storage/visual/*
 !storage/raw/.gitkeep
 !storage/chunks/video/.gitkeep
 !storage/chunks/audio/.gitkeep
 !storage/outputs/.gitkeep
 !storage/audio/.gitkeep
+!storage/visual/.gitkeep
 
 # ── Model weights ─────────────────────────────────────────────────────────────
 weights/

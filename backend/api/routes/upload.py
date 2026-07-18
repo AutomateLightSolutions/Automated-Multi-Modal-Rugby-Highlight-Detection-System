@@ -67,32 +67,40 @@ async def delete_match(
     match_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
 ):
+    import shutil
+
     match = await async_get_match(session, match_id)
     if not match:
         raise HTTPException(status_code=404, detail=f"Match {match_id} not found.")
 
-    if match.status in ("extracting", "processing"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot delete a match that is currently {match.status}. "
-                   "Wait for it to complete or fail first.",
-        )
-
     filename = match.filename
+    storage = settings.STORAGE_BASE.resolve()
 
     file_paths = await async_delete_match(session, match_id)
 
-    # Raw video and full audio are not stored in segment records — reconstruct paths
+    # Raw video, full audio, and visual track
     file_paths += [
-        str(settings.STORAGE_BASE / "raw" / f"{match_id}_{filename}"),
-        str(settings.STORAGE_BASE / "audio" / f"{match_id}_full.wav"),
+        str(storage / "raw" / f"{match_id}_{filename}"),
+        str(storage / "audio" / f"{match_id}_full.wav"),
+        str(storage / "visual" / f"{match_id}_visual.mp4"),
     ]
 
     for path_str in file_paths:
         try:
-            Path(path_str).unlink(missing_ok=True)
+            Path(path_str).resolve().unlink(missing_ok=True)
         except OSError:
-            pass  # best-effort; don't fail the request over a missing file
+            pass
+
+    # Delete chunk directories and visual frames directory for this match
+    for chunk_dir in [
+        storage / "chunks" / "video" / str(match_id),
+        storage / "chunks" / "audio" / str(match_id),
+        storage / "visual" / str(match_id),
+    ]:
+        try:
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+        except OSError:
+            pass
 
     return {"deleted": True, "match_id": str(match_id)}
 

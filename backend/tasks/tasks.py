@@ -53,8 +53,10 @@ def process_match(_self, match_id: str, video_path: str):
         )
 
         # e. Segment into fixed-duration chunks
+        # Video chunks are sliced from the visual track (no audio);
+        # audio chunks are sliced from the full WAV.
         chunks = segment_match(
-            video_path, match_id, meta["full_audio_path"],
+            meta["visual_path"], match_id, meta["full_audio_path"],
             settings.STORAGE_BASE, settings.CHUNK_DURATION_SEC,
         )
 

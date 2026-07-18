@@ -31,7 +31,6 @@ export default function MatchesPage() {
   const [selectedId, setSelectedId] = useState(null)
   const [activeJobId, setActiveJobId] = useState(null)
   const [showUploadDrawer, setShowUploadDrawer] = useState(false)
-  const [deleteIds, setDeleteIds] = useState(new Set())
   const [deleteLoading, setDeleteLoading] = useState(false)
   const detailRef = useRef(null)
 
@@ -61,46 +60,25 @@ export default function MatchesPage() {
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
   }
 
-  const handleToggleDelete = (matchId) => {
-    setDeleteIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(matchId)) next.delete(matchId)
-      else next.add(matchId)
-      return next
-    })
-  }
-
-  const handleDeleteConfirm = async () => {
+  const handleDeleteMatch = async (matchId) => {
     setDeleteLoading(true)
-    const ids = [...deleteIds]
-    const results = await Promise.allSettled(ids.map((id) => deleteMatch(id)))
-
-    const succeeded = []
-    const failed = []
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled") succeeded.push(ids[i])
-      else failed.push(ids[i])
-    })
-
-    if (succeeded.length > 0) {
+    try {
+      await deleteMatch(matchId)
       setMatches((prev) => {
-        const updated = prev.filter((m) => !succeeded.includes(m.match_id))
+        const updated = prev.filter((m) => m.match_id !== matchId)
         saveMatches(updated)
         return updated
       })
-      if (succeeded.includes(selectedId)) {
+      if (matchId === selectedId) {
         setSelectedId(null)
         setActiveJobId(null)
       }
-      toast.success(`Deleted ${succeeded.length} match${succeeded.length > 1 ? "es" : ""}`)
+      toast.success("Match deleted")
+    } catch (err) {
+      toast.error(err?.response?.data?.detail ?? "Failed to delete match")
+    } finally {
+      setDeleteLoading(false)
     }
-
-    if (failed.length > 0) {
-      toast.error(`${failed.length} match${failed.length > 1 ? "es" : ""} could not be deleted (may still be processing)`)
-    }
-
-    setDeleteIds(new Set())
-    setDeleteLoading(false)
   }
 
   const handleUploadSuccess = (matchId, filename) => {
@@ -134,9 +112,7 @@ export default function MatchesPage() {
               selectedId={selectedId}
               onSelect={handleSelect}
               onUploadClick={() => setShowUploadDrawer(true)}
-              deleteIds={deleteIds}
-              onToggleDelete={handleToggleDelete}
-              onDeleteConfirm={handleDeleteConfirm}
+              onDeleteMatch={handleDeleteMatch}
               deleteLoading={deleteLoading}
             />
           </div>
