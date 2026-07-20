@@ -4,7 +4,9 @@ Pydantic request/response schemas for the API layer.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, UUID4
+from pydantic import BaseModel, Field, UUID4
+
+from constants import EventType, HighlightType
 
 
 class MatchUploadResponse(BaseModel):
@@ -16,9 +18,8 @@ class MatchUploadResponse(BaseModel):
 
 class HighlightJobRequest(BaseModel):
     match_id: UUID4
-    user_filter: Optional[str] = None
-    # user_filter examples: "scrums only", "tries only", "lineouts only"
-    # Pass None for full automatic highlight
+    highlight_type: HighlightType
+    requested_events: list[EventType] = Field(..., min_length=1)
 
 
 class HighlightJobResponse(BaseModel):
@@ -42,6 +43,8 @@ class SegmentResult(BaseModel):
 class JobStatusResponse(BaseModel):
     job_id: UUID4
     status: str
+    highlight_type: HighlightType
+    requested_events: list[EventType]
     output_path: Optional[str] = None
     error_message: Optional[str] = None
     segments: Optional[list[SegmentResult]] = None
@@ -53,4 +56,14 @@ class MatchStatusResponse(BaseModel):
     status: str
     duration_sec: Optional[float] = None
     fps: Optional[float] = None
+    created_at: datetime
+
+
+class HighlightJobSummary(BaseModel):
+    job_id: UUID4
+    status: str
+    highlight_type: HighlightType
+    requested_events: list[EventType]
+    output_path: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: datetime

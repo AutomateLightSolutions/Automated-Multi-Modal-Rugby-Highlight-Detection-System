@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 RUGBY_VOCABULARY = [
-    "scrum", "try", "lineout", "penalty", "conversion",
+    "scrum", "try", "lineout", "penalty", "conversion", "kick",
+    "yellow", "red", "card", "sinbin", "tmo", "replay", "review",
     "tackle", "breakdown", "ruck", "maul", "offload",
     "grubber", "incredible", "brilliant", "danger",
     "forward", "referee", "whistle", "ball", "player",

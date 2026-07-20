@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas import MatchStatusResponse, MatchUploadResponse
 from config import settings
 from db import AsyncSessionLocal
-from db.crud import async_create_match, async_delete_match, async_get_match
+from db.crud import async_create_match, async_delete_match, async_get_match, async_list_matches
 
 router = APIRouter()
 
@@ -60,6 +60,24 @@ async def upload_match(
             f"Poll /api/v1/matches/{match_id}/status to track progress."
         ),
     )
+
+
+@router.get("/matches", response_model=list[MatchStatusResponse])
+async def list_matches(
+    session: AsyncSession = Depends(get_db),
+):
+    matches = await async_list_matches(session)
+    return [
+        MatchStatusResponse(
+            match_id=match.id,
+            filename=match.filename,
+            status=match.status,
+            duration_sec=match.duration_sec,
+            fps=match.fps,
+            created_at=match.created_at,
+        )
+        for match in matches
+    ]
 
 
 @router.delete("/matches/{match_id}", status_code=200)

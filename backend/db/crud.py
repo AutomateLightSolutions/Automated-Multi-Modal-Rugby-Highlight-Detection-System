@@ -104,12 +104,14 @@ def sync_get_module_outputs_by_segment(session: Session, segment_id: str) -> lis
 def sync_update_fusion_result(
     session: Session,
     segment_id: str,
+    job_id: str,
     selected: bool,
     rank: int | None,
 ) -> None:
     result = session.execute(
         select(FusionResult).where(
-            FusionResult.segment_id == uuid.UUID(segment_id)
+            FusionResult.segment_id == uuid.UUID(segment_id),
+            FusionResult.job_id == uuid.UUID(job_id),
         )
     ).scalar_one_or_none()
     if result:
@@ -122,6 +124,7 @@ def sync_create_fusion_result(
     session: Session,
     segment_id: str,
     match_id: str,
+    job_id: str,
     fused_confidence: float,
     selected: bool,
     rank: int | None,
@@ -129,6 +132,7 @@ def sync_create_fusion_result(
     result = FusionResult(
         segment_id=uuid.UUID(segment_id),
         match_id=uuid.UUID(match_id),
+        job_id=uuid.UUID(job_id),
         fused_confidence=fused_confidence,
         selected=selected,
         rank=rank,
@@ -157,10 +161,23 @@ async def async_get_match(session: AsyncSession, match_id: uuid.UUID) -> Match |
     return await session.get(Match, match_id)
 
 
+async def async_list_matches(session: AsyncSession) -> list[Match]:
+    stmt = select(Match).order_by(Match.created_at.desc())
+    return list((await session.execute(stmt)).scalars())
+
+
 async def async_create_highlight_job(
-    session: AsyncSession, match_id: uuid.UUID, user_filter: str | None
+    session: AsyncSession,
+    match_id: uuid.UUID,
+    highlight_type: str,
+    requested_events: list[str],
 ) -> HighlightJob:
-    job = HighlightJob(match_id=match_id, status="pending", user_filter=user_filter)
+    job = HighlightJob(
+        match_id=match_id,
+        status="pending",
+        highlight_type=highlight_type,
+        requested_events=requested_events,
+    )
     session.add(job)
     await session.commit()
     await session.refresh(job)
@@ -182,7 +199,7 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
         .options(
             selectinload(Match.segments).selectinload(Segment.module_outputs),
             selectinload(Match.segments).selectinload(Segment.fusion_results),
-            selectinload(Match.highlight_jobs),
+            selectinload(Match.highlight_jobs).selectinload(HighlightJob.fusion_results),
             selectinload(Match.fusion_results),
         )
         .where(Match.id == match_id)
@@ -207,9 +224,9 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
 
 
 async def async_get_selected_fusion_results(
-    session: AsyncSession, match_id: uuid.UUID
+    session: AsyncSession, job_id: uuid.UUID
 ) -> list[dict]:
-    """Return selected FusionResults joined with Segment and visual ModuleOutput, ordered by rank."""
+    """Return one job's selected FusionResults joined with Segment and visual ModuleOutput, ordered by rank."""
     stmt = (
         select(FusionResult, Segment, ModuleOutput)
         .join(Segment, FusionResult.segment_id == Segment.id)
@@ -220,8 +237,32 @@ async def async_get_selected_fusion_results(
                 ModuleOutput.module_name == "visual",
             ),
         )
-        .where(FusionResult.match_id == match_id, FusionResult.selected.is_(True))
+        .where(FusionResult.job_id == job_id, FusionResult.selected.is_(True))
         .order_by(FusionResult.rank)
     )
     rows = (await session.execute(stmt)).all()
     return [{"fusion": fusion, "segment": segment, "visual": visual} for fusion, segment, visual in rows]
+
+
+async def async_get_highlight_jobs_by_match(
+    session: AsyncSession, match_id: uuid.UUID
+) -> list[HighlightJob]:
+    stmt = (
+        select(HighlightJob)
+        .where(HighlightJob.match_id == match_id)
+        .order_by(HighlightJob.created_at.desc())
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
+async def async_delete_highlight_job(
+    session: AsyncSession, job_id: uuid.UUID
+) -> str | None:
+    """Delete a highlight job (cascades its fusion results). Returns its output_path, if any."""
+    job = await session.get(HighlightJob, job_id)
+    if not job:
+        return None
+    output_path = job.output_path
+    await session.delete(job)
+    await session.commit()
+    return output_path

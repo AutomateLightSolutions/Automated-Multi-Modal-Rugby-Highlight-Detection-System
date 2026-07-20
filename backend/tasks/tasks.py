@@ -213,7 +213,9 @@ def run_audio_energy_module(
 # ---------------------------------------------------------------------------
 
 @app.task(name="tasks.tasks.generate_highlight")
-def generate_highlight(job_id: str, match_id: str, user_filter: str | None):
+def generate_highlight(
+    job_id: str, match_id: str, highlight_type: str, requested_events: list[str]
+):
     from fusion import run_fusion_pipeline
     from pipeline.assembler import assemble_highlight
 
@@ -221,7 +223,9 @@ def generate_highlight(job_id: str, match_id: str, user_filter: str | None):
     try:
         sync_update_highlight_job(session, job_id, status="running")
 
-        selected_segments = run_fusion_pipeline(match_id, user_filter, session)
+        selected_segments = run_fusion_pipeline(
+            match_id, job_id, requested_events, highlight_type, session
+        )
 
         if not selected_segments:
             sync_update_highlight_job(

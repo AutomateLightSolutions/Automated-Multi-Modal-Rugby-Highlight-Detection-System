@@ -1,4 +1,4 @@
-import { Search, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Search, Plus, Trash2, AlertTriangle, Loader2 } from "lucide-react";
 import { useState } from "react";
 import PropTypes from "prop-types";
 import StatusBadge from "../ui/StatusBadge";
@@ -6,6 +6,7 @@ import { formatTimeAgo } from "../../utils/formatters";
 
 export default function Sidebar({
   matches,
+  loading,
   selectedId,
   onSelect,
   onUploadClick,
@@ -54,12 +55,18 @@ export default function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-2 px-1">
-        {filtered.length === 0 && (
+        {loading && (
+          <div className="flex items-center justify-center gap-2 text-sm text-text-muted py-8">
+            <Loader2 size={14} className="animate-spin" />
+            Loading matches…
+          </div>
+        )}
+        {!loading && filtered.length === 0 && (
           <p className="text-sm text-text-muted text-center py-8">
             No matches yet
           </p>
         )}
-        {filtered.map((m) => {
+        {!loading && filtered.map((m) => {
           const isSelected = selectedId === m.match_id;
           const isPending = pendingDeleteId === m.match_id;
 
@@ -145,6 +152,7 @@ export default function Sidebar({
 
 Sidebar.propTypes = {
   matches: PropTypes.array.isRequired,
+  loading: PropTypes.bool,
   selectedId: PropTypes.string,
   onSelect: PropTypes.func.isRequired,
   onUploadClick: PropTypes.func.isRequired,
