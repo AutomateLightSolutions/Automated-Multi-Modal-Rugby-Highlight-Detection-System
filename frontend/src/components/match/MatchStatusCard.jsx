@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { CheckCircle, Zap, Loader2, AlertCircle, XCircle } from "lucide-react"
-import toast from "react-hot-toast"
+import { CheckCircle, Loader2, AlertCircle, XCircle } from "lucide-react"
 import { useMatchPolling } from "../../hooks/useMatchPolling"
-import { generateHighlight } from "../../lib/api"
+import { getMatchHighlights } from "../../lib/api"
 import StatusBadge from "../ui/StatusBadge"
 import LoadingSpinner from "../ui/LoadingSpinner"
+import HighlightRequestForm from "./HighlightRequestForm"
+import HighlightJobsList from "./HighlightJobsList"
 import { formatDuration } from "../../utils/formatters"
 
 const STAGES = [
@@ -70,26 +71,27 @@ function PipelineStepper({ status }) {
   )
 }
 
-export default function MatchStatusCard({ matchId, onJobCreated, onStatusChange }) {
+export default function MatchStatusCard({ matchId, onStatusChange }) {
   const { data, isLoading, isError } = useMatchPolling(matchId)
-  const [filter, setFilter] = useState("")
-  const [generating, setGenerating] = useState(false)
+  const [jobs, setJobs] = useState([])
 
   useEffect(() => {
     if (data?.status) onStatusChange?.(data.status)
   }, [data?.status, onStatusChange])
 
-  const handleGenerate = async () => {
-    setGenerating(true)
-    toast("🔄 AI analysis started")
-    try {
-      const res = await generateHighlight(matchId, filter || null)
-      onJobCreated?.(res.data.job_id)
-    } catch (err) {
-      toast.error(err?.response?.data?.detail ?? "Failed to start generation")
-    } finally {
-      setGenerating(false)
-    }
+  useEffect(() => {
+    setJobs([])
+    getMatchHighlights(matchId)
+      .then((res) => setJobs(res.data.map((j) => ({ job_id: j.job_id }))))
+      .catch(() => setJobs([]))
+  }, [matchId])
+
+  const handleJobCreated = (jobId) => {
+    setJobs((prev) => [{ job_id: jobId }, ...prev])
+  }
+
+  const handleJobDeleted = (jobId) => {
+    setJobs((prev) => prev.filter((j) => j.job_id !== jobId))
   }
 
   if (isLoading) return <div className="glass-card p-6"><LoadingSpinner text="Loading match status…" /></div>
@@ -131,26 +133,21 @@ export default function MatchStatusCard({ matchId, onJobCreated, onStatusChange 
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="space-y-3 pt-2 border-t border-border"
+          className="pt-4 border-t border-border space-y-6"
         >
-          <p className="text-sm font-medium text-text-secondary">Generate highlight reel</p>
-          <input
-            className="input"
-            placeholder="Filter (e.g. scrums only, tries only) — leave blank for all"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <button
-            className="btn-primary w-full flex items-center justify-center gap-2"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? (
-              <><Loader2 size={16} className="animate-spin" /> Generating…</>
-            ) : (
-              <><Zap size={16} /> Generate Highlight</>
-            )}
-          </button>
+          <div>
+            <p className="text-sm font-medium text-text-secondary mb-3">Generate highlight reel</p>
+            <HighlightRequestForm matchId={matchId} onJobCreated={handleJobCreated} />
+          </div>
+
+          {jobs.length > 0 && (
+            <div>
+              <p className="text-xs text-text-muted mb-3 uppercase tracking-wider font-semibold">
+                Generated highlights
+              </p>
+              <HighlightJobsList jobs={jobs} onJobDeleted={handleJobDeleted} />
+            </div>
+          )}
         </motion.div>
       )}
 

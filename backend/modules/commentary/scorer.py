@@ -2,7 +2,8 @@
 Commentary excitement scorer.
 Scores a segment based on rugby keywords detected in transcription.
 confidence = overall excitement level of the commentary (0.0 to 1.0)
-event_type = highest-weight keyword found (or None)
+event_type = canonical event class (constants.EventType) of the
+             highest-weight keyword found (or None)
 event_confidence = None (commentary does not classify events with certainty)
 """
 
@@ -12,24 +13,33 @@ from modules.commentary.asr import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
-# Keywords and their excitement weights
+# Keywords, their excitement weights, and the canonical EventType they map to.
+# word -> (weight, event_type)
 RUGBY_KEYWORDS = {
-    "try": 1.0,
-    "scrum": 0.85,
-    "penalty": 0.80,
-    "lineout": 0.75,
-    "conversion": 0.70,
-    "offload": 0.65,
-    "tackle": 0.60,
-    "breakdown": 0.55,
-    "ruck": 0.55,
-    "maul": 0.50,
-    "grubber": 0.50,
-    "incredible": 0.50,
-    "brilliant": 0.45,
-    "danger": 0.40,
-    "whistle": 0.35,
-    "referee": 0.30
+    "try": (1.0, "try"),
+    "scrum": (0.85, "scrum"),
+    "penalty": (0.80, "kick"),
+    "lineout": (0.75, "lineout"),
+    "conversion": (0.70, "kick"),
+    "kick": (0.65, "kick"),
+    "yellow": (0.85, "card"),
+    "red": (0.90, "card"),
+    "card": (0.80, "card"),
+    "sinbin": (0.80, "card"),
+    "tmo": (0.55, "tmo_replay"),
+    "replay": (0.50, "tmo_replay"),
+    "review": (0.50, "tmo_replay"),
+    "offload": (0.65, None),
+    "tackle": (0.60, None),
+    "breakdown": (0.55, None),
+    "ruck": (0.55, None),
+    "maul": (0.50, None),
+    "grubber": (0.50, None),
+    "incredible": (0.50, None),
+    "brilliant": (0.45, None),
+    "danger": (0.40, None),
+    "whistle": (0.35, None),
+    "referee": (0.30, None),
 }
 
 
@@ -52,11 +62,13 @@ def run_inference(audio_path: str, global_start_sec: float,
     for word_data in words:
         word = word_data["word"].lower().strip(".,!?")
         if word in RUGBY_KEYWORDS:
-            weight = RUGBY_KEYWORDS[word]
+            weight, event_type = RUGBY_KEYWORDS[word]
             raw_score += weight
-            if weight > best_event_weight:
+            # Only words that map to a canonical event class can win the
+            # segment's event_type — others (e.g. "tackle") only add excitement.
+            if event_type is not None and weight > best_event_weight:
                 best_event_weight = weight
-                best_event = word
+                best_event = event_type
 
     # Clip raw score (can exceed 1.0 with many keywords)
     raw_score = min(raw_score, 2.0) / 2.0  # normalise to [0,1]

@@ -6,34 +6,34 @@ import toast from "react-hot-toast"
 import PageWrapper from "../components/layout/PageWrapper"
 import Sidebar from "../components/layout/Sidebar"
 import MatchStatusCard from "../components/match/MatchStatusCard"
-import JobStatusCard from "../components/match/JobStatusCard"
 import EmptyState from "../components/ui/EmptyState"
 import UploadZone from "../components/upload/UploadZone"
-import { deleteMatch } from "../lib/api"
+import { deleteMatch, listMatches } from "../lib/api"
 
-const STORAGE_KEY = "hl_matches"
-
-function loadMatches() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")
-  } catch {
-    return []
+function toSidebarMatch(m) {
+  return {
+    match_id: m.match_id,
+    filename: m.filename,
+    status: m.status,
+    uploadedAt: m.created_at,
   }
-}
-
-function saveMatches(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
 }
 
 export default function MatchesPage() {
   const location = useLocation()
-  const [matches, setMatches] = useState(loadMatches)
+  const [matches, setMatches] = useState([])
+  const [matchesLoading, setMatchesLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
-  const [activeJobId, setActiveJobId] = useState(null)
   const [showUploadDrawer, setShowUploadDrawer] = useState(false)
-  const [deleteIds, setDeleteIds] = useState(new Set())
   const [deleteLoading, setDeleteLoading] = useState(false)
   const detailRef = useRef(null)
+
+  useEffect(() => {
+    listMatches()
+      .then((res) => setMatches(res.data.map(toSidebarMatch)))
+      .catch(() => toast.error("Failed to load matches"))
+      .finally(() => setMatchesLoading(false))
+  }, [])
 
   useEffect(() => {
     if (location.state?.matchId) {
@@ -46,82 +46,52 @@ export default function MatchesPage() {
   const addMatch = (matchId, filename) => {
     setMatches((prev) => {
       if (prev.some((m) => m.match_id === matchId)) return prev
-      const updated = [
+      return [
         { match_id: matchId, filename: filename ?? matchId, status: "uploaded", uploadedAt: new Date().toISOString() },
         ...prev,
       ]
-      saveMatches(updated)
-      return updated
     })
   }
 
   const handleSelect = (id) => {
     setSelectedId(id)
-    setActiveJobId(null)
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
   }
 
-  const handleToggleDelete = (matchId) => {
-    setDeleteIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(matchId)) next.delete(matchId)
-      else next.add(matchId)
-      return next
-    })
-  }
-
-  const handleDeleteConfirm = async () => {
+  const handleDeleteMatch = async (matchId) => {
     setDeleteLoading(true)
-    const ids = [...deleteIds]
-    const results = await Promise.allSettled(ids.map((id) => deleteMatch(id)))
-
-    const succeeded = []
-    const failed = []
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled") succeeded.push(ids[i])
-      else failed.push(ids[i])
-    })
-
-    if (succeeded.length > 0) {
-      setMatches((prev) => {
-        const updated = prev.filter((m) => !succeeded.includes(m.match_id))
-        saveMatches(updated)
-        return updated
-      })
-      if (succeeded.includes(selectedId)) {
-        setSelectedId(null)
-        setActiveJobId(null)
+    try {
+      await deleteMatch(matchId)
+      toast.success("Match deleted")
+    } catch (err) {
+      if (err?.response?.status === 404) {
+        // Already gone on the backend (e.g. stale local cache after a DB reset) —
+        // still remove it from the visible list instead of leaving it stuck.
+        toast("Match was already removed", { icon: "ℹ️" })
+      } else {
+        toast.error(err?.response?.data?.detail ?? "Failed to delete match")
+        setDeleteLoading(false)
+        return
       }
-      toast.success(`Deleted ${succeeded.length} match${succeeded.length > 1 ? "es" : ""}`)
     }
 
-    if (failed.length > 0) {
-      toast.error(`${failed.length} match${failed.length > 1 ? "es" : ""} could not be deleted (may still be processing)`)
+    setMatches((prev) => prev.filter((m) => m.match_id !== matchId))
+    if (matchId === selectedId) {
+      setSelectedId(null)
     }
-
-    setDeleteIds(new Set())
     setDeleteLoading(false)
   }
 
   const handleUploadSuccess = (matchId, filename) => {
     addMatch(matchId, filename)
     setSelectedId(matchId)
-    setActiveJobId(null)
     setShowUploadDrawer(false)
   }
 
   const handleStatusChange = (matchId, status) => {
-    setMatches((prev) => {
-      const updated = prev.map((m) =>
-        m.match_id === matchId ? { ...m, status } : m
-      )
-      saveMatches(updated)
-      return updated
-    })
-  }
-
-  const handleJobCreated = (jobId) => {
-    setActiveJobId(jobId)
+    setMatches((prev) =>
+      prev.map((m) => (m.match_id === matchId ? { ...m, status } : m))
+    )
   }
 
   return (
@@ -131,12 +101,11 @@ export default function MatchesPage() {
           <div className="hidden md:block">
             <Sidebar
               matches={matches}
+              loading={matchesLoading}
               selectedId={selectedId}
               onSelect={handleSelect}
               onUploadClick={() => setShowUploadDrawer(true)}
-              deleteIds={deleteIds}
-              onToggleDelete={handleToggleDelete}
-              onDeleteConfirm={handleDeleteConfirm}
+              onDeleteMatch={handleDeleteMatch}
               deleteLoading={deleteLoading}
             />
           </div>
@@ -153,10 +122,8 @@ export default function MatchesPage() {
                 >
                   <MatchStatusCard
                     matchId={selectedId}
-                    onJobCreated={handleJobCreated}
                     onStatusChange={(status) => handleStatusChange(selectedId, status)}
                   />
-                  {activeJobId && <JobStatusCard jobId={activeJobId} />}
                 </motion.div>
               </AnimatePresence>
             ) : (

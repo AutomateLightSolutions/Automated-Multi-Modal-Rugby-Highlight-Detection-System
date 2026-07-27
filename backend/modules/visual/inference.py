@@ -95,11 +95,11 @@ def run_inference(video_path: str, global_start_sec: float,
     mean_confidence = float(np.mean(frame_scores))
 
     # Simulate event detection (weighted toward "none")
+    # Classes match constants.EventType exactly.
     event_weights = {
-        "none": 0.70, "scrum": 0.07, "try": 0.04,
-        "lineout": 0.05, "tackle": 0.05, "penalty": 0.03,
-        "conversion": 0.02, "kick": 0.02,
-        "breakdown": 0.01, "ruck": 0.01
+        "none": 0.70, "try": 0.06, "kick": 0.08,
+        "card": 0.03, "scrum": 0.07, "lineout": 0.05,
+        "tmo_replay": 0.01
     }
     event_type = random.choices(
         list(event_weights.keys()),

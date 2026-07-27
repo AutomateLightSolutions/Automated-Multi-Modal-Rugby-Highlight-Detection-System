@@ -81,12 +81,16 @@ class FusionResult(Base):
     match_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("matches.id"), nullable=False
     )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("highlight_jobs.id"), nullable=False
+    )
     fused_confidence: Mapped[float] = mapped_column(Float, nullable=False)
     selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     segment: Mapped["Segment"] = relationship("Segment", back_populates="fusion_results")
     match: Mapped["Match"] = relationship("Match", back_populates="fusion_results")
+    job: Mapped["HighlightJob"] = relationship("HighlightJob", back_populates="fusion_results")
 
 
 class HighlightJob(Base):
@@ -97,9 +101,13 @@ class HighlightJob(Base):
         UUID(as_uuid=True), ForeignKey("matches.id"), nullable=False
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
-    user_filter: Mapped[str | None] = mapped_column(String, nullable=True)
+    highlight_type: Mapped[str] = mapped_column(String, nullable=False)
+    requested_events: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     output_path: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     match: Mapped["Match"] = relationship("Match", back_populates="highlight_jobs")
+    fusion_results: Mapped[list["FusionResult"]] = relationship(
+        "FusionResult", back_populates="job", cascade="all, delete-orphan"
+    )

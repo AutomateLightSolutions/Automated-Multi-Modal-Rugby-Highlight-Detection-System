@@ -57,11 +57,12 @@ def extract_media(
     storage_base: Path,
 ) -> dict:
     """
-    Extract full audio track from video and probe metadata.
+    Extract full audio track and visual frames from video and probe metadata.
 
     Returns:
-        dict with keys: duration_sec, fps, full_audio_path
+        dict with keys: duration_sec, fps, full_audio_path, visual_frames_dir
     """
+    # --- Audio extraction ---
     audio_dir = storage_base / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     audio_path = audio_dir / f"{match_id}_full.wav"
@@ -76,10 +77,27 @@ def extract_media(
         capture_output=True,
     )
 
+    # --- Visual track extraction (video only, no audio) ---
+    visual_dir = storage_base / "visual"
+    visual_dir.mkdir(parents=True, exist_ok=True)
+    visual_path = visual_dir / f"{match_id}_visual.mp4"
+
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", video_path,
+            "-an",        # strip audio stream
+            "-c:v", "copy",  # copy video codec — no re-encoding, fast
+            str(visual_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
     info = probe_video(video_path)
 
     return {
         "duration_sec": info["duration"],
         "fps": info["fps"],
         "full_audio_path": str(audio_path),
+        "visual_path": str(visual_path),
     }

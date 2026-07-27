@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { formatMatchTime } from "../../utils/formatters"
+import { EVENT_TYPE_LABELS } from "../../constants/highlights"
 
 function segmentColor(confidence) {
   if (confidence >= 0.7) return "#10B981"
@@ -59,7 +60,9 @@ export default function Timeline({ segments = [], onClick }) {
             Confidence: {Math.round((tooltip.seg.fused_confidence ?? 0) * 100)}%
           </p>
           {tooltip.seg.event_type && (
-            <p className="text-accent-cyan capitalize">{tooltip.seg.event_type}</p>
+            <p className="text-accent-cyan">
+              {EVENT_TYPE_LABELS[tooltip.seg.event_type] ?? tooltip.seg.event_type}
+            </p>
           )}
         </div>
       )}

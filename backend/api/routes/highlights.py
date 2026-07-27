@@ -11,13 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas import (
     HighlightJobRequest,
     HighlightJobResponse,
+    HighlightJobSummary,
     JobStatusResponse,
     SegmentResult,
 )
 from db import AsyncSessionLocal
 from db.crud import (
     async_create_highlight_job,
+    async_delete_highlight_job,
     async_get_highlight_job,
+    async_get_highlight_jobs_by_match,
     async_get_match,
     async_get_selected_fusion_results,
 )
@@ -44,10 +47,15 @@ async def generate_highlights(
             detail="Match is still processing. Wait for status=done before generating highlights.",
         )
 
-    job = await async_create_highlight_job(session, body.match_id, body.user_filter)
+    highlight_type = body.highlight_type.value
+    requested_events = [e.value for e in body.requested_events]
+
+    job = await async_create_highlight_job(
+        session, body.match_id, highlight_type, requested_events
+    )
 
     from tasks.tasks import generate_highlight
-    generate_highlight.delay(str(job.id), str(body.match_id), body.user_filter)
+    generate_highlight.delay(str(job.id), str(body.match_id), highlight_type, requested_events)
 
     return HighlightJobResponse(
         job_id=job.id,
@@ -67,7 +75,7 @@ async def get_highlight_status(
 
     segments = None
     if job.status == "done":
-        rows = await async_get_selected_fusion_results(session, job.match_id)
+        rows = await async_get_selected_fusion_results(session, job.id)
         segments = [
             SegmentResult(
                 segment_id=row["fusion"].segment_id,
@@ -85,10 +93,51 @@ async def get_highlight_status(
     return JobStatusResponse(
         job_id=job.id,
         status=job.status,
+        highlight_type=job.highlight_type,
+        requested_events=job.requested_events,
         output_path=job.output_path,
         error_message=job.error_message,
         segments=segments,
     )
+
+
+@router.get("/matches/{match_id}/highlights", response_model=list[HighlightJobSummary])
+async def list_match_highlights(
+    match_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    jobs = await async_get_highlight_jobs_by_match(session, match_id)
+    return [
+        HighlightJobSummary(
+            job_id=job.id,
+            status=job.status,
+            highlight_type=job.highlight_type,
+            requested_events=job.requested_events,
+            output_path=job.output_path,
+            error_message=job.error_message,
+            created_at=job.created_at,
+        )
+        for job in jobs
+    ]
+
+
+@router.delete("/highlights/{job_id}", status_code=200)
+async def delete_highlight(
+    job_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    job = await async_get_highlight_job(session, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Highlight job {job_id} not found.")
+
+    output_path = await async_delete_highlight_job(session, job_id)
+    if output_path:
+        try:
+            Path(output_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return {"deleted": True, "job_id": str(job_id)}
 
 
 @router.get("/highlights/download/{job_id}")

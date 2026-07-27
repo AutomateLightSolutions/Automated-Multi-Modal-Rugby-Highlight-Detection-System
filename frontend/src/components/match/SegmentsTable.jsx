@@ -1,6 +1,7 @@
 import { motion } from "framer-motion"
 import ConfidenceBar from "../ui/ConfidenceBar"
 import { formatMatchTime, formatDuration } from "../../utils/formatters"
+import { EVENT_TYPE_LABELS } from "../../constants/highlights"
 
 function RankBadge({ rank }) {
   if (rank === 1) return <span title="#1">🥇</span>
@@ -12,7 +13,7 @@ function RankBadge({ rank }) {
 function EventPill({ type }) {
   if (!type) return <span className="text-text-muted text-xs">—</span>
   return (
-    <span className="badge-cyan capitalize text-xs">{type}</span>
+    <span className="badge-cyan text-xs">{EVENT_TYPE_LABELS[type] ?? type}</span>
   )
 }
 

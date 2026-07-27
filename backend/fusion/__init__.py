@@ -4,9 +4,10 @@ Loads all module outputs from DB, aligns, scores, filters, selects.
 """
 
 import logging
+from constants import HighlightType, HIGHLIGHT_DURATION_BUDGET_SEC
 from fusion.aligner import align_module_outputs
 from fusion.scorer import compute_fused_score
-from fusion.filter import apply_user_filter
+from fusion.filter import filter_by_requested_events
 from fusion.selector import select_segments
 from db.crud import (
     sync_get_segments_by_match,
@@ -18,8 +19,8 @@ from db.crud import (
 logger = logging.getLogger(__name__)
 
 
-def run_fusion_pipeline(match_id: str, user_filter: str | None,
-                         session) -> list[dict]:
+def run_fusion_pipeline(match_id: str, job_id: str, requested_events: list[str],
+                         highlight_type: str, session) -> list[dict]:
     """
     Full fusion pipeline for one match.
 
@@ -71,6 +72,7 @@ def run_fusion_pipeline(match_id: str, user_filter: str | None,
             session,
             segment_id=str(segment.id),
             match_id=match_id,
+            job_id=job_id,
             fused_confidence=fused_score,
             selected=False,
             rank=None,
@@ -89,17 +91,19 @@ def run_fusion_pipeline(match_id: str, user_filter: str | None,
             "visual_event_confidence": visual_out.get("event_confidence"),
         })
 
-    # Apply user filter
-    filtered = apply_user_filter(all_fused, user_filter)
+    # Filter 1: keep only clips matching a requested event type
+    filtered = filter_by_requested_events(all_fused, requested_events)
 
-    # NMS selection
-    selected = select_segments(filtered, top_n=10, min_gap_sec=5.0)
+    # Filter 2: greedily fill the highlight_type's duration budget
+    duration_budget_sec = HIGHLIGHT_DURATION_BUDGET_SEC[HighlightType(highlight_type)]
+    selected = select_segments(filtered, duration_budget_sec=duration_budget_sec, min_gap_sec=5.0)
 
     # Mark selected segments in DB with their rank
     for seg in selected:
         sync_update_fusion_result(
             session,
             seg["segment_id"],
+            job_id=job_id,
             selected=True,
             rank=seg["rank"],
         )

@@ -20,11 +20,10 @@ HOW TO REPLACE THE STUB WITH YOUR REAL MODEL:
 import torch
 import torch.nn as nn
 
-# Rugby event classes your visual model should detect
+# Rugby event classes your visual model should detect.
+# Must match constants.EventType exactly (plus "none" for no event).
 EVENT_CLASSES = [
-    "none", "scrum", "try", "lineout",
-    "tackle", "penalty", "conversion",
-    "kick", "breakdown", "ruck"
+    "none", "try", "kick", "card", "scrum", "lineout", "tmo_replay"
 ]
 
 

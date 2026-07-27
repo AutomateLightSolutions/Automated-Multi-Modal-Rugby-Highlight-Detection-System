@@ -18,20 +18,30 @@ export const uploadMatch = (file, onProgress) => {
   })
 }
 
+export const listMatches = () =>
+  api.get("/matches")
+
 export const getMatchStatus = (matchId) =>
   api.get(`/matches/${matchId}/status`)
 
 export const deleteMatch = (matchId) =>
   api.delete(`/matches/${matchId}`)
 
-export const generateHighlight = (matchId, userFilter = null) =>
+export const generateHighlight = (matchId, highlightType, requestedEvents) =>
   api.post("/highlights/generate", {
     match_id: matchId,
-    user_filter: userFilter,
+    highlight_type: highlightType,
+    requested_events: requestedEvents,
   })
 
 export const getJobStatus = (jobId) =>
   api.get(`/highlights/status/${jobId}`)
+
+export const getMatchHighlights = (matchId) =>
+  api.get(`/matches/${matchId}/highlights`)
+
+export const deleteHighlight = (jobId) =>
+  api.delete(`/highlights/${jobId}`)
 
 export const getStorageStatus = (matchId) =>
   api.get(`/highlights/storage/${matchId}`)
