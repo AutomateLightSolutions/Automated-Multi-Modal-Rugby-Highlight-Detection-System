@@ -6,6 +6,7 @@ import { GitFork, BookOpen, Menu, X } from "lucide-react"
 const LINKS = [
   { to: "/", label: "Home" },
   { to: "/matches", label: "Matches" },
+  { to: "/admin", label: "Admin" },
   { to: "/about", label: "About" },
 ]
 

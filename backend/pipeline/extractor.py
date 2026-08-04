@@ -5,6 +5,27 @@ import json
 import subprocess
 from pathlib import Path
 
+# Both extracted tracks are cut from the same uploaded file, but ffmpeg's
+# "-c:v copy" can snap to the nearest keyframe and stream durations can be
+# reported slightly differently per codec — this is the max drift we tolerate
+# before treating it as a real mismatch (which would make every downstream
+# absolute timestamp wrong).
+MAX_AUDIO_VIDEO_DRIFT_SEC = 0.5
+
+
+def _probe_duration_sec(media_path: str) -> float:
+    """Return the container duration (seconds) of any media file via ffprobe."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", media_path,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return float(json.loads(result.stdout)["format"]["duration"])
+
 
 def probe_video(video_path: str) -> dict:
     """
@@ -95,9 +116,25 @@ def extract_media(
 
     info = probe_video(video_path)
 
+    # Same-source timebase check: both tracks were cut from `video_path` above,
+    # but verify the *resulting files* actually agree before anything downstream
+    # (tiling, fusion) trusts their timestamps as interchangeable.
+    video_duration = _probe_duration_sec(str(visual_path))
+    audio_duration = _probe_duration_sec(str(audio_path))
+    audio_offset_sec = audio_duration - video_duration
+    if abs(audio_offset_sec) > MAX_AUDIO_VIDEO_DRIFT_SEC:
+        raise RuntimeError(
+            f"Audio/video duration mismatch for match {match_id}: "
+            f"video={video_duration:.3f}s audio={audio_duration:.3f}s "
+            f"(diff={audio_offset_sec:.3f}s, tolerance={MAX_AUDIO_VIDEO_DRIFT_SEC}s). "
+            f"Both tracks must be extracted from the same untrimmed upload — "
+            f"every absolute timestamp downstream would otherwise be wrong."
+        )
+
     return {
         "duration_sec": info["duration"],
         "fps": info["fps"],
         "full_audio_path": str(audio_path),
         "visual_path": str(visual_path),
+        "audio_offset_sec": audio_offset_sec,
     }

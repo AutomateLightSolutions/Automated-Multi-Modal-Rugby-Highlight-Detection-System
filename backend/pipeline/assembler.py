@@ -12,7 +12,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-PADDING_SEC = 2.0  # seconds added before and after each selected segment
+# Pipeline v2: 0 by default — the highlight selector's expand/trim step
+# (fusion/highlight_selector.py) already guarantees context around each
+# clip's peak; a nonzero pad here would push clips outside the profile's
+# stated duration bounds. Pass padding_sec explicitly to override.
+PADDING_SEC = 0.0
 
 
 def assemble_highlight(selected_segments: list[dict],

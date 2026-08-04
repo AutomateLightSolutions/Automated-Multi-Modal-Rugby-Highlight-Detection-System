@@ -18,9 +18,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str
     STORAGE_BASE: Path = Path("./storage")
-    CHUNK_DURATION_SEC: int = 30
+    CHUNK_DURATION_SEC: int = 30  # legacy v1 pipeline only; v2 uses constants.TILE_SEC/AUDIO_WINDOW_SEC
     MODEL_WEIGHTS_PATH: Path = Path("./weights")
     LOG_LEVEL: str = "INFO"
+
+    # Commentators react *after* the play — shifting word timestamps earlier by
+    # this amount before gridding may improve alignment with visual/audio.
+    # Default 0 keeps behaviour deterministic until this is measured; 2.0s is
+    # a reasonable starting point to experiment with.
+    COMMENTARY_LAG_SEC: float = 0.0
+    WHISPER_MODEL_SIZE: str = "base"
 
     @property
     def SYNC_DATABASE_URL(self) -> str:

@@ -17,19 +17,17 @@ function EventPill({ type }) {
   )
 }
 
-export default function SegmentsTable({ segments = [] }) {
-  const totalSec = segments.reduce(
-    (acc, s) => acc + (s.global_end_sec - s.global_start_sec), 0
-  )
-  const topConf = segments.length
-    ? Math.max(...segments.map((s) => s.fused_confidence ?? 0))
+export default function ClipsTable({ clips = [] }) {
+  const totalSec = clips.reduce((acc, c) => acc + (c.duration_sec ?? 0), 0)
+  const topScore = clips.length
+    ? Math.max(...clips.map((c) => c.peak_score ?? 0))
     : 0
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-4 text-sm text-text-secondary">
         <span>
-          <span className="text-text-primary font-semibold">{segments.length}</span> highlight segments
+          <span className="text-text-primary font-semibold">{clips.length}</span> highlight clips
         </span>
         <span className="text-border">·</span>
         <span>
@@ -37,8 +35,8 @@ export default function SegmentsTable({ segments = [] }) {
         </span>
         <span className="text-border">·</span>
         <span>
-          Top confidence:{" "}
-          <span className="text-accent-emerald font-semibold">{Math.round(topConf * 100)}%</span>
+          Top score:{" "}
+          <span className="text-accent-emerald font-semibold">{Math.round(topScore * 100)}%</span>
         </span>
       </div>
 
@@ -49,14 +47,14 @@ export default function SegmentsTable({ segments = [] }) {
               <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider">Rank</th>
               <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider">Time Window</th>
               <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider">Duration</th>
-              <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider min-w-[160px]">Confidence</th>
+              <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider min-w-[160px]">Peak Score</th>
               <th className="text-left px-4 py-3 text-text-muted font-medium text-xs uppercase tracking-wider">Event</th>
             </tr>
           </thead>
           <tbody>
-            {segments.map((seg, i) => (
+            {clips.map((clip, i) => (
               <motion.tr
-                key={seg.segment_id ?? i}
+                key={i}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.05 }}
@@ -64,19 +62,19 @@ export default function SegmentsTable({ segments = [] }) {
                   ${i % 2 === 0 ? "bg-bg-card" : "bg-bg-tertiary"} hover:bg-indigo-500/5`}
               >
                 <td className="px-4 py-3">
-                  <RankBadge rank={seg.rank ?? i + 1} />
+                  <RankBadge rank={clip.rank ?? i + 1} />
                 </td>
                 <td className="px-4 py-3 font-mono text-text-primary text-xs whitespace-nowrap">
-                  {formatMatchTime(seg.global_start_sec)} → {formatMatchTime(seg.global_end_sec)}
+                  {formatMatchTime(clip.global_start_sec)} → {formatMatchTime(clip.global_end_sec)}
                 </td>
                 <td className="px-4 py-3 text-text-secondary text-xs">
-                  {formatDuration(seg.global_end_sec - seg.global_start_sec)}
+                  {formatDuration(clip.duration_sec)}
                 </td>
                 <td className="px-4 py-3 min-w-[160px]">
-                  <ConfidenceBar value={seg.fused_confidence ?? 0} showLabel />
+                  <ConfidenceBar value={clip.peak_score ?? 0} showLabel />
                 </td>
                 <td className="px-4 py-3">
-                  <EventPill type={seg.event_type} />
+                  <EventPill type={clip.event} />
                 </td>
               </motion.tr>
             ))}

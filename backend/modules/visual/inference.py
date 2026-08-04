@@ -1,127 +1,140 @@
 """
-Visual module inference interface.
+Visual module inference — orchestrates tiling, SlowFast forward passes, and
+per-tile merge for one match's full visual-only track.
 
-STUB BEHAVIOUR (current):
-- Reads frame count from video using ffprobe
-- Generates random excitement scores per frame using Beta(2,5) distribution
-- Randomly assigns event_type weighted toward "none"
-- Returns peak excitement as confidence
-
-HOW TO REPLACE WITH REAL MODEL:
-1. Load model once at module level (singleton pattern below)
-2. In run_inference(), extract frames with OpenCV
-3. Preprocess: resize to model input size, normalize, stack into tensor
-4. Run model forward pass with torch.no_grad()
-5. Aggregate frame-level scores with temporal max pooling
-6. Apply softmax to event_logits → event_confidence
-7. Replace the stub return values with real model outputs
+The model is loaded once per Celery worker process (module-level singleton),
+never per clip or per tile — SlowFast is expensive enough that reloading it
+per clip would be the dominant cost.
 """
-
-import random
 import logging
-import subprocess
-import json
-import numpy as np
+
+import torch
+import torch.nn.functional as F
+
+from config import settings
+from constants import EVENT_CLASSES
+from modules.visual.merge import merge_tile
+from modules.visual.model import RugbyVisualClassifier
+from modules.visual.preprocessing import build_pathway_tensors
+from modules.visual.tiling import tile_match
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Model singleton — loaded once when the Celery worker starts
-# Uncomment when replacing stub with real model:
-#
-# import torch
-# from config import settings
-# from modules.visual.model import EVENT_CLASSES, RugbyVisualClassifier
-# _model = None
-#
-# def _get_model():
-#     global _model
-#     if _model is None:
-#         weights_path = settings.MODEL_WEIGHTS_PATH / "visual" / "rugby_action_classifier.pth"
-#         _model = RugbyVisualClassifier(num_classes=len(EVENT_CLASSES))
-#         _model.load_state_dict(torch.load(weights_path, map_location="cpu"))
-#         _model.eval()
-#         logger.info(f"Visual model loaded from {weights_path}")
-#     return _model
-# ---------------------------------------------------------------------------
+CHECKPOINT_PATH = settings.MODEL_WEIGHTS_PATH / "visual" / "best_model.pt"
+
+_model: RugbyVisualClassifier | None = None
+_device: torch.device | None = None
 
 
-def _get_frame_count(video_path: str) -> int:
-    """Use ffprobe to count frames without decoding the entire video."""
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_streams",
-        "-select_streams", "v:0",
-        video_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        return 25 * 30  # fallback: assume 25fps × 30sec
-    data = json.loads(result.stdout)
-    streams = data.get("streams", [])
-    if streams:
-        nb_frames = streams[0].get("nb_frames")
-        if nb_frames:
-            return int(nb_frames)
-    return 25 * 30
+def get_device() -> torch.device:
+    global _device
+    if _device is None:
+        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info("Visual module device: %s", _device)
+    return _device
 
 
-def run_inference(video_path: str, global_start_sec: float,
-                  global_end_sec: float) -> dict:
+def get_model() -> RugbyVisualClassifier:
+    global _model
+    if _model is None:
+        device = get_device()
+        model = RugbyVisualClassifier()
+        # weights_only=True restricts unpickling to tensors/plain types — this
+        # checkpoint is only {epoch, model_state_dict, val_loss}, so it's safe
+        # and avoids torch.load's arbitrary-code-execution surface.
+        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=True)
+        model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+        model.to(device)
+        model.eval()
+        _model = model
+        logger.info(
+            "Visual model loaded from %s (epoch=%s, val_loss=%s)",
+            CHECKPOINT_PATH, checkpoint.get("epoch"), checkpoint.get("val_loss"),
+        )
+    return _model
+
+
+def _run_window(model: RugbyVisualClassifier, device: torch.device,
+                 video_path: str, clip_start: float, clip_end: float) -> dict:
+    slow, fast = build_pathway_tensors(video_path, clip_start, clip_end)
+    slow = slow.to(device)
+    fast = fast.to(device)
+    with torch.no_grad():
+        class_logits, score = model(slow, fast)
+        probs = F.softmax(class_logits, dim=1)
+    return {
+        "softmax": probs[0].detach().cpu().tolist(),
+        "score": float(score[0].detach().cpu()),
+    }
+
+
+def analyze_match(video_path: str, duration_sec: float) -> dict:
     """
-    Run visual analysis on a video chunk.
-
-    Args:
-        video_path: path to the video chunk file
-        global_start_sec: absolute start time in the full match (seconds)
-        global_end_sec: absolute end time in the full match (seconds)
+    Run the full tiled SlowFast analysis over one match's visual-only track.
 
     Returns:
-        Module output dict conforming to the system contract.
-    """
-    # --- STUB IMPLEMENTATION ---
-    # Replace everything below with real model inference.
-
-    num_frames = _get_frame_count(video_path)
-
-    # Simulate per-frame excitement scores
-    rng = np.random.default_rng()
-    frame_scores = rng.beta(a=2, b=5, size=num_frames).astype(float)
-    # Beta(2,5) gives realistic distribution: mostly low scores,
-    # occasional spikes — more realistic than uniform random.
-
-    peak_confidence = float(np.max(frame_scores))
-    mean_confidence = float(np.mean(frame_scores))
-
-    # Simulate event detection (weighted toward "none")
-    # Classes match constants.EventType exactly.
-    event_weights = {
-        "none": 0.70, "try": 0.06, "kick": 0.08,
-        "card": 0.03, "scrum": 0.07, "lineout": 0.05,
-        "tmo_replay": 0.01
-    }
-    event_type = random.choices(
-        list(event_weights.keys()),
-        weights=list(event_weights.values())
-    )[0]
-
-    if event_type == "none":
-        event_type = None
-        event_confidence = None
-    else:
-        event_confidence = round(random.uniform(0.55, 0.95), 4)
-
-    return {
-        "segment_id": None,  # set by the calling task
-        "module": "visual",
-        "global_start_sec": global_start_sec,
-        "global_end_sec": global_end_sec,
-        "confidence": round(peak_confidence, 4),
-        "event_type": event_type,
-        "event_confidence": event_confidence,
-        "extra_data": {
-            "mean_confidence": round(mean_confidence, 4),
-            "num_frames_processed": num_frames
+        {
+            "tiles": [ {tile_index, global_start_sec, global_end_sec, module,
+                        window_sec, predicted_event, event_confidence,
+                        highlight_score, event_probs, extra}, ... ],
+            "raw_windows": [ {tile_index, window_sec, clip_start_sec, clip_end_sec,
+                               raw_event, raw_confidence, raw_score, softmax,
+                               masked_mass, dropped, drop_reason}, ... ],
         }
-    }
+    """
+    model = get_model()
+    device = get_device()
+
+    tiles = tile_match(duration_sec)
+    tile_records = []
+    raw_window_records = []
+
+    for tile in tiles:
+        window_predictions = {}
+        for window_sec, (clip_start, clip_end) in tile["windows"].items():
+            window_predictions[window_sec] = _run_window(model, device, video_path, clip_start, clip_end)
+
+        merged = merge_tile(window_predictions)
+
+        for window_sec, (clip_start, clip_end) in tile["windows"].items():
+            pred = window_predictions[window_sec]
+            audit = merged["window_audit"].get(window_sec, {"masked_mass": 0.0, "dropped": True})
+            raw_best_idx = pred["softmax"].index(max(pred["softmax"]))
+            raw_window_records.append({
+                "tile_index": tile["tile_index"],
+                "window_sec": window_sec,
+                "clip_start_sec": clip_start,
+                "clip_end_sec": clip_end,
+                "raw_event": EVENT_CLASSES[raw_best_idx],
+                "raw_confidence": round(pred["softmax"][raw_best_idx], 6),
+                "raw_score": round(pred["score"], 4),
+                "softmax": pred["softmax"],
+                "masked_mass": audit["masked_mass"],
+                "dropped": audit["dropped"],
+                "drop_reason": (
+                    "masked probability mass below threshold" if audit["dropped"] else None
+                ),
+            })
+
+        tile_records.append({
+            "tile_index": tile["tile_index"],
+            "global_start_sec": tile["tile_start_sec"],
+            "global_end_sec": tile["tile_end_sec"],
+            "predicted_event": merged["predicted_event"],
+            "event_confidence": merged["event_confidence"],
+            "highlight_score": merged["merged_score"],
+            "event_probs": merged["event_probs"],
+            "extra": {
+                "fallback_used": merged["fallback_used"],
+                "windows_dropped": merged["windows_dropped"],
+            },
+        })
+
+        logger.debug(
+            "tile %d [%.1fs-%.1fs]: event=%s conf=%.3f score=%.3f dropped=%s fallback=%s",
+            tile["tile_index"], tile["tile_start_sec"], tile["tile_end_sec"],
+            merged["predicted_event"], merged["event_confidence"], merged["merged_score"],
+            merged["windows_dropped"], merged["fallback_used"],
+        )
+
+    return {"tiles": tile_records, "raw_windows": raw_window_records}

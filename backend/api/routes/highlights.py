@@ -9,20 +9,20 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import (
+    HighlightClipResult,
     HighlightJobRequest,
     HighlightJobResponse,
     HighlightJobSummary,
     JobStatusResponse,
-    SegmentResult,
 )
 from db import AsyncSessionLocal
 from db.crud import (
     async_create_highlight_job,
     async_delete_highlight_job,
+    async_get_highlight_clips,
     async_get_highlight_job,
     async_get_highlight_jobs_by_match,
     async_get_match,
-    async_get_selected_fusion_results,
 )
 
 router = APIRouter()
@@ -73,19 +73,20 @@ async def get_highlight_status(
     if not job:
         raise HTTPException(status_code=404, detail=f"Highlight job {job_id} not found.")
 
-    segments = None
+    clips = None
     if job.status == "done":
-        rows = await async_get_selected_fusion_results(session, job.id)
-        segments = [
-            SegmentResult(
-                segment_id=row["fusion"].segment_id,
-                global_start_sec=row["segment"].global_start_sec,
-                global_end_sec=row["segment"].global_end_sec,
-                fused_confidence=row["fusion"].fused_confidence,
-                selected=row["fusion"].selected,
-                rank=row["fusion"].rank,
-                event_type=row["visual"].event_type if row["visual"] else None,
-                event_confidence=row["visual"].event_confidence if row["visual"] else None,
+        rows = await async_get_highlight_clips(session, job.id)
+        clips = [
+            HighlightClipResult(
+                rank=row.rank,
+                global_start_sec=row.global_start_sec,
+                global_end_sec=row.global_end_sec,
+                duration_sec=row.duration_sec,
+                event=row.event,
+                peak_score=row.peak_score,
+                mean_score=row.mean_score,
+                was_expanded=row.was_expanded,
+                was_trimmed=row.was_trimmed,
             )
             for row in rows
         ]
@@ -97,7 +98,7 @@ async def get_highlight_status(
         requested_events=job.requested_events,
         output_path=job.output_path,
         error_message=job.error_message,
-        segments=segments,
+        clips=clips,
     )
 
 

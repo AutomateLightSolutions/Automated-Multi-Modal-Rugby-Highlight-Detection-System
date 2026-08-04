@@ -1,53 +1,55 @@
 """
-Visual model architecture definition.
+SlowFast R50 dual-head model.
 
-HOW TO REPLACE THE STUB WITH YOUR REAL MODEL:
-1. Define your model class here (CNN, ViT, SlowFast, etc.)
-2. The class must accept video frames as input.
-   Recommended input: (batch, channels, frames, height, width)
-   for 3D CNNs, or (batch, frames, channels, height, width) for ViTs.
-3. Output should be a tuple: (excitement_score, event_logits)
-   where excitement_score is a scalar in [0,1] and event_logits
-   is a vector over your event classes.
-4. Save weights with:
-   torch.save(model.state_dict(), "weights/visual/rugby_action_classifier.pth")
-5. In inference.py, load with:
-   model = RugbyVisualClassifier(num_classes=len(EVENT_CLASSES))
-   model.load_state_dict(torch.load(weights_path))
-   model.eval()
+Architecture is dictated by the trained checkpoint (best_model.pt), not
+chosen freely here:
+  - Backbone: pytorchvideo's slowfast_r50, stem + 4 residual stages only
+    (blocks[0:5]) — its own pooling/fusion and classification head
+    (blocks[5]) are dropped in favour of the custom heads below, matching
+    how this checkpoint was trained.
+  - Each pathway's final feature map -> AdaptiveAvgPool3d(1) -> flatten ->
+    concat -> (batch, 2304) fused vector (2048 slow-pathway channels +
+    256 fast-pathway channels).
+  - class_head: Linear(2304 -> 10) over EVENT_CLASSES.
+  - score_head: Linear(2304 -> 1) + Sigmoid, continuous highlight score.
+
+forward(slow, fast) returns (class_logits, score) as RAW logits — softmax is
+applied by the caller (modules/visual/inference.py), not baked in here,
+since the checkpoint was trained against raw logits + BCE-on-sigmoid, never
+asked to emit softmax directly.
 """
-
 import torch
 import torch.nn as nn
 
-# Rugby event classes your visual model should detect.
-# Must match constants.EventType exactly (plus "none" for no event).
-EVENT_CLASSES = [
-    "none", "try", "kick", "card", "scrum", "lineout", "tmo_replay"
-]
+from constants import EVENT_CLASSES
+
+FUSED_FEATURE_DIM = 2304  # 2048 (slow pathway) + 256 (fast pathway)
 
 
 class RugbyVisualClassifier(nn.Module):
-    """
-    Placeholder architecture. Replace with your actual model.
-    Current stub: simple CNN feature extractor + classifier head.
-    """
     def __init__(self, num_classes: int = len(EVENT_CLASSES)):
         super().__init__()
-        self.num_classes = num_classes
-        # TODO: replace with your real architecture
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))
-        )
-        self.classifier = nn.Linear(64 * 4 * 4, num_classes)
-        self.excitement_head = nn.Linear(64 * 4 * 4, 1)
+        self.backbone = _build_backbone()
+        self.pool = nn.AdaptiveAvgPool3d(1)
+        self.class_head = nn.Linear(FUSED_FEATURE_DIM, num_classes)
+        self.score_head = nn.Sequential(nn.Linear(FUSED_FEATURE_DIM, 1), nn.Sigmoid())
 
-    def forward(self, x):
-        # x: (batch, channels, height, width)
-        features = self.feature_extractor(x)
-        features = features.flatten(1)
-        event_logits = self.classifier(features)
-        excitement = torch.sigmoid(self.excitement_head(features))
-        return excitement, event_logits
+    def forward(self, slow: torch.Tensor, fast: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = [slow, fast]
+        for block in self.backbone:
+            x = block(x)
+        # x is now [slow_features, fast_features], each (B, C, T, H, W)
+        pooled = [self.pool(pathway).flatten(1) for pathway in x]
+        fused = torch.cat(pooled, dim=1)  # (B, 2304)
+
+        class_logits = self.class_head(fused)
+        score = self.score_head(fused).squeeze(-1)
+        return class_logits, score
+
+
+def _build_backbone() -> nn.ModuleList:
+    from pytorchvideo.models.hub import slowfast_r50
+
+    # pretrained=False always — best_model.pt supplies all weights.
+    full_model = slowfast_r50(pretrained=False)
+    return nn.ModuleList(list(full_model.blocks.children())[:5])

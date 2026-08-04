@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { formatMatchTime } from "../../utils/formatters"
 import { EVENT_TYPE_LABELS } from "../../constants/highlights"
+import FloatingTooltip, { computeTooltipAnchor } from "./FloatingTooltip"
 
 function segmentColor(confidence) {
   if (confidence >= 0.7) return "#10B981"
@@ -8,22 +9,22 @@ function segmentColor(confidence) {
   return "#F59E0B"
 }
 
-export default function Timeline({ segments = [], onClick }) {
+export default function Timeline({ clips = [], onClick }) {
   const [tooltip, setTooltip] = useState(null)
 
-  if (!segments.length) return null
+  if (!clips.length) return null
 
-  const maxEnd = Math.max(...segments.map((s) => s.global_end_sec))
+  const maxEnd = Math.max(...clips.map((c) => c.global_end_sec))
   const totalDuration = maxEnd || 1
 
   return (
     <div className="space-y-2">
       <div className="relative h-10 bg-bg-tertiary rounded-xl overflow-visible mx-1">
-        {segments.map((seg, i) => {
+        {clips.map((seg, i) => {
           const left = (seg.global_start_sec / totalDuration) * 100
           const width = ((seg.global_end_sec - seg.global_start_sec) / totalDuration) * 100
-          const heightPct = 40 + Math.round((seg.fused_confidence ?? 0.5) * 60)
-          const color = segmentColor(seg.fused_confidence ?? 0.5)
+          const heightPct = 40 + Math.round((seg.peak_score ?? 0.5) * 60)
+          const color = segmentColor(seg.peak_score ?? 0.5)
           return (
             <div
               key={i}
@@ -35,7 +36,7 @@ export default function Timeline({ segments = [], onClick }) {
                 backgroundColor: color,
               }}
               onMouseEnter={(e) =>
-                setTooltip({ seg, x: e.currentTarget.getBoundingClientRect().left })
+                setTooltip({ seg, anchor: computeTooltipAnchor(e.currentTarget.getBoundingClientRect()) })
               }
               onMouseLeave={() => setTooltip(null)}
               onClick={() => onClick?.(seg)}
@@ -50,22 +51,24 @@ export default function Timeline({ segments = [], onClick }) {
         ))}
       </div>
 
-      {tooltip && (
-        <div className="glass-card p-3 text-xs space-y-1 max-w-[200px]">
-          <p className="font-mono text-text-primary">
-            {formatMatchTime(tooltip.seg.global_start_sec)} →{" "}
-            {formatMatchTime(tooltip.seg.global_end_sec)}
-          </p>
-          <p className="text-text-secondary">
-            Confidence: {Math.round((tooltip.seg.fused_confidence ?? 0) * 100)}%
-          </p>
-          {tooltip.seg.event_type && (
-            <p className="text-accent-cyan">
-              {EVENT_TYPE_LABELS[tooltip.seg.event_type] ?? tooltip.seg.event_type}
+      <FloatingTooltip anchor={tooltip?.anchor}>
+        {tooltip && (
+          <>
+            <p className="font-mono text-text-primary">
+              {formatMatchTime(tooltip.seg.global_start_sec)} →{" "}
+              {formatMatchTime(tooltip.seg.global_end_sec)}
             </p>
-          )}
-        </div>
-      )}
+            <p className="text-text-secondary">
+              Peak score: {Math.round((tooltip.seg.peak_score ?? 0) * 100)}%
+            </p>
+            {tooltip.seg.event && (
+              <p className="text-accent-cyan">
+                {EVENT_TYPE_LABELS[tooltip.seg.event] ?? tooltip.seg.event}
+              </p>
+            )}
+          </>
+        )}
+      </FloatingTooltip>
     </div>
   )
 }
