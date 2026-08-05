@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models for matches, segments, module outputs, fusion results, and highlight jobs.
+SQLAlchemy ORM models for matches, module predictions, fusion, and highlights.
 """
 import uuid
 from datetime import datetime
@@ -39,14 +39,8 @@ class Match(Base):
     progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
-    segments: Mapped[list["Segment"]] = relationship(
-        "Segment", back_populates="match", cascade="all, delete-orphan"
-    )
     highlight_jobs: Mapped[list["HighlightJob"]] = relationship(
         "HighlightJob", back_populates="match", cascade="all, delete-orphan"
-    )
-    fusion_results: Mapped[list["FusionResult"]] = relationship(
-        "FusionResult", back_populates="match", cascade="all, delete-orphan"
     )
     module_predictions: Mapped[list["ModulePrediction"]] = relationship(
         "ModulePrediction", back_populates="match", cascade="all, delete-orphan"
@@ -57,65 +51,6 @@ class Match(Base):
     fusion_runs: Mapped[list["FusionRun"]] = relationship(
         "FusionRun", back_populates="match", cascade="all, delete-orphan"
     )
-
-
-class Segment(Base):
-    __tablename__ = "segments"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    match_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matches.id"), nullable=False
-    )
-    global_start_sec: Mapped[float] = mapped_column(Float, nullable=False)
-    global_end_sec: Mapped[float] = mapped_column(Float, nullable=False)
-    video_chunk_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    audio_chunk_path: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    match: Mapped["Match"] = relationship("Match", back_populates="segments")
-    module_outputs: Mapped[list["ModuleOutput"]] = relationship(
-        "ModuleOutput", back_populates="segment", cascade="all, delete-orphan"
-    )
-    fusion_results: Mapped[list["FusionResult"]] = relationship(
-        "FusionResult", back_populates="segment", cascade="all, delete-orphan"
-    )
-
-
-class ModuleOutput(Base):
-    __tablename__ = "module_outputs"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    segment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("segments.id"), nullable=False
-    )
-    module_name: Mapped[str] = mapped_column(String, nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    event_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    event_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    extra_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    segment: Mapped["Segment"] = relationship("Segment", back_populates="module_outputs")
-
-
-class FusionResult(Base):
-    __tablename__ = "fusion_results"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    segment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("segments.id"), nullable=False
-    )
-    match_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matches.id"), nullable=False
-    )
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("highlight_jobs.id"), nullable=False
-    )
-    fused_confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-    segment: Mapped["Segment"] = relationship("Segment", back_populates="fusion_results")
-    match: Mapped["Match"] = relationship("Match", back_populates="fusion_results")
-    job: Mapped["HighlightJob"] = relationship("HighlightJob", back_populates="fusion_results")
 
 
 class HighlightJob(Base):
@@ -132,7 +67,8 @@ class HighlightJob(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
-    # v2 (fusion_cell-based) jobs only — null for legacy v1 jobs.
+    # Null until generate_highlight resolves the match's active fusion_run
+    # (set right after job creation, before selection runs).
     fusion_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("fusion_runs.id"), nullable=True
     )
@@ -143,9 +79,6 @@ class HighlightJob(Base):
     clip_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     match: Mapped["Match"] = relationship("Match", back_populates="highlight_jobs")
-    fusion_results: Mapped[list["FusionResult"]] = relationship(
-        "FusionResult", back_populates="job", cascade="all, delete-orphan"
-    )
     fusion_run: Mapped["FusionRun | None"] = relationship("FusionRun")
     highlight_clips: Mapped[list["HighlightClip"]] = relationship(
         "HighlightClip", back_populates="job", cascade="all, delete-orphan"
