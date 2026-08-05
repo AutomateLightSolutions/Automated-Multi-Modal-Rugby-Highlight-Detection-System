@@ -3,13 +3,13 @@ CRUD helpers — sync variants for Celery workers, async variants for FastAPI en
 """
 import uuid
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from db.models import (
-    FusionCell, FusionResult, FusionRun, HighlightClip, HighlightJob, Match,
-    ModuleOutput, ModulePrediction, Segment, VisualWindowPrediction,
+    FusionCell, FusionRun, HighlightClip, HighlightJob, Match,
+    ModulePrediction, VisualWindowPrediction,
 )
 
 
@@ -61,50 +61,6 @@ def sync_update_match_progress(session: Session, match_id: str, module: str, **f
     session.commit()
 
 
-def sync_create_segment(
-    session: Session,
-    match_id: str,
-    global_start_sec: float,
-    global_end_sec: float,
-    video_chunk_path: str,
-    audio_chunk_path: str,
-) -> Segment:
-    segment = Segment(
-        match_id=uuid.UUID(match_id),
-        global_start_sec=global_start_sec,
-        global_end_sec=global_end_sec,
-        video_chunk_path=video_chunk_path,
-        audio_chunk_path=audio_chunk_path,
-    )
-    session.add(segment)
-    session.commit()
-    session.refresh(segment)
-    return segment
-
-
-def sync_create_module_output(
-    session: Session,
-    segment_id: str,
-    module_name: str,
-    confidence: float,
-    event_type: str | None,
-    event_confidence: float | None,
-    extra_data: dict | None,
-) -> ModuleOutput:
-    output = ModuleOutput(
-        segment_id=uuid.UUID(segment_id),
-        module_name=module_name,
-        confidence=confidence,
-        event_type=event_type,
-        event_confidence=event_confidence,
-        extra_data=extra_data,
-    )
-    session.add(output)
-    session.commit()
-    session.refresh(output)
-    return output
-
-
 def sync_get_highlight_job(session: Session, job_id: str) -> HighlightJob | None:
     return session.get(HighlightJob, uuid.UUID(job_id))
 
@@ -115,66 +71,6 @@ def sync_update_highlight_job(session: Session, job_id: str, **kwargs) -> None:
         for key, value in kwargs.items():
             setattr(job, key, value)
         session.commit()
-
-
-def sync_get_segments_by_match(session: Session, match_id: str) -> list:
-    return list(
-        session.execute(
-            select(Segment).where(Segment.match_id == uuid.UUID(match_id))
-        ).scalars()
-    )
-
-
-def sync_get_module_outputs_by_segment(session: Session, segment_id: str) -> list:
-    return list(
-        session.execute(
-            select(ModuleOutput).where(
-                ModuleOutput.segment_id == uuid.UUID(segment_id)
-            )
-        ).scalars()
-    )
-
-
-def sync_update_fusion_result(
-    session: Session,
-    segment_id: str,
-    job_id: str,
-    selected: bool,
-    rank: int | None,
-) -> None:
-    result = session.execute(
-        select(FusionResult).where(
-            FusionResult.segment_id == uuid.UUID(segment_id),
-            FusionResult.job_id == uuid.UUID(job_id),
-        )
-    ).scalar_one_or_none()
-    if result:
-        result.selected = selected
-        result.rank = rank
-        session.commit()
-
-
-def sync_create_fusion_result(
-    session: Session,
-    segment_id: str,
-    match_id: str,
-    job_id: str,
-    fused_confidence: float,
-    selected: bool,
-    rank: int | None,
-) -> FusionResult:
-    result = FusionResult(
-        segment_id=uuid.UUID(segment_id),
-        match_id=uuid.UUID(match_id),
-        job_id=uuid.UUID(job_id),
-        fused_confidence=fused_confidence,
-        selected=selected,
-        rank=rank,
-    )
-    session.add(result)
-    session.commit()
-    session.refresh(result)
-    return result
 
 
 def sync_bulk_create_module_predictions(
@@ -384,11 +280,7 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
     result = await session.execute(
         select(Match)
         .options(
-            selectinload(Match.segments).selectinload(Segment.module_outputs),
-            selectinload(Match.segments).selectinload(Segment.fusion_results),
-            selectinload(Match.highlight_jobs).selectinload(HighlightJob.fusion_results),
             selectinload(Match.highlight_jobs).selectinload(HighlightJob.highlight_clips),
-            selectinload(Match.fusion_results),
             selectinload(Match.module_predictions),
             selectinload(Match.visual_window_predictions),
             selectinload(Match.fusion_runs).selectinload(FusionRun.cells),
@@ -400,11 +292,6 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
         return []
 
     file_paths: list[str] = []
-    for seg in match.segments:
-        if seg.video_chunk_path:
-            file_paths.append(seg.video_chunk_path)
-        if seg.audio_chunk_path:
-            file_paths.append(seg.audio_chunk_path)
     for job in match.highlight_jobs:
         if job.output_path:
             file_paths.append(job.output_path)
@@ -417,27 +304,6 @@ async def async_delete_match(session: AsyncSession, match_id: uuid.UUID) -> list
 async def async_get_highlight_clips(session: AsyncSession, job_id: uuid.UUID) -> list[HighlightClip]:
     stmt = select(HighlightClip).where(HighlightClip.job_id == job_id).order_by(HighlightClip.rank)
     return list((await session.execute(stmt)).scalars())
-
-
-async def async_get_selected_fusion_results(
-    session: AsyncSession, job_id: uuid.UUID
-) -> list[dict]:
-    """Return one job's selected FusionResults joined with Segment and visual ModuleOutput, ordered by rank."""
-    stmt = (
-        select(FusionResult, Segment, ModuleOutput)
-        .join(Segment, FusionResult.segment_id == Segment.id)
-        .outerjoin(
-            ModuleOutput,
-            and_(
-                ModuleOutput.segment_id == Segment.id,
-                ModuleOutput.module_name == "visual",
-            ),
-        )
-        .where(FusionResult.job_id == job_id, FusionResult.selected.is_(True))
-        .order_by(FusionResult.rank)
-    )
-    rows = (await session.execute(stmt)).all()
-    return [{"fusion": fusion, "segment": segment, "visual": visual} for fusion, segment, visual in rows]
 
 
 async def async_get_highlight_jobs_by_match(
