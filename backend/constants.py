@@ -57,15 +57,33 @@ class HighlightType(str, Enum):
 
 
 # Highlight generation rules (pipeline v2), keyed by HighlightType.
-# Clip lengths are multiples of FUSION_GRID_SEC (4s) — min/max are rounded to
-# the nearest 4s boundary that stays INSIDE the requested [min, max] range
-# (min rounds up, max rounds down), so generated clips never fall outside
-# the intended bounds: short requested 15-45s -> 16-44s; extended requested
-# 40-90s -> 40-88s.
+# Clip lengths are multiples of FUSION_GRID_SEC (4s) — min_clip_sec is rounded
+# to the nearest 4s boundary that stays >= the requested minimum (short
+# requested 15s -> 16s; extended 40s -> 40s exact).
+#
+# max_clip_sec is kept as recorded metadata (surfaced in job params) but is
+# NOT the active trim threshold — see CLIP_SAFETY_CEILING_SEC below. Clips
+# are no longer force-trimmed to max_clip_sec: cutting a natural run there
+# was slicing through ongoing action. Runs now keep their natural length up
+# to the safety ceiling; the reel's total duration flexes between
+# budget_sec (target) and budget_max_sec (ceiling) to absorb the difference
+# instead of arbitrarily cutting or dropping whole clips.
 PROFILES: dict[str, dict] = {
-    HighlightType.SHORT: {"budget_sec": 180.0, "min_clip_sec": 16.0, "max_clip_sec": 44.0},
-    HighlightType.EXTENDED: {"budget_sec": 720.0, "min_clip_sec": 40.0, "max_clip_sec": 88.0},
+    HighlightType.SHORT: {
+        "budget_sec": 180.0, "budget_max_sec": 300.0,
+        "min_clip_sec": 16.0, "max_clip_sec": 44.0,
+    },
+    HighlightType.EXTENDED: {
+        "budget_sec": 720.0, "budget_max_sec": 900.0,
+        "min_clip_sec": 40.0, "max_clip_sec": 88.0,
+    },
 }
+
+# Absolute per-clip safety valve — a run longer than this (a very long
+# unbroken stretch of one identical event label) gets trimmed to its
+# best-scoring window of this length. Runs shorter than this pass through
+# at their natural length, uncut.
+CLIP_SAFETY_CEILING_SEC = 90.0
 
 MIN_GAP_SEC = 4.0        # minimum gap between selected clips
 MIN_CELL_SCORE = 0.35    # candidate cell floor

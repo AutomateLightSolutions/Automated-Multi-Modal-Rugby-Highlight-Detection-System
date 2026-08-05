@@ -6,16 +6,21 @@ ranked, budget-filled list of highlight clips for one profile ("short" /
 Pipeline:
   1. Filter cells to the requested events, above MIN_CELL_SCORE.
   2. Group consecutive same-event cells into runs, bridging small gaps.
-  3. Fit each run into the profile's [min_clip_sec, max_clip_sec] bounds
-     (expand short runs around their peak cell, trim long runs to their
-     best-scoring window).
-  4. Rank candidates, then greedily fill the profile's duration budget —
-     optionally guaranteeing each requested event at least one clip first.
+  3. Fit each run: expand short runs up to min_clip_sec around their peak
+     cell; runs at or above that stay at their NATURAL length, uncut, up to
+     CLIP_SAFETY_CEILING_SEC (a rare safety valve, not normal shaping) —
+     trimming a run to a fixed max length was cutting through ongoing action.
+  4. Rank candidates, then greedily fill the profile's duration budget (up
+     to budget_max_sec if needed to fit whole clips rather than dropping or
+     cutting them) — optionally guaranteeing each requested event at least
+     one clip first.
   5. Return clips sorted chronologically, each carrying its confidence rank.
 """
 import logging
 
-from constants import BRIDGE_CELLS, FUSION_GRID_SEC, MIN_CELL_SCORE, MIN_GAP_SEC
+from constants import (
+    BRIDGE_CELLS, CLIP_SAFETY_CEILING_SEC, FUSION_GRID_SEC, MIN_CELL_SCORE, MIN_GAP_SEC,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,16 +156,20 @@ def _best_window(cells: list[dict], window_cells: int) -> tuple[int, int]:
 
 
 def fit_run_to_profile(run: dict, all_cells_by_index: dict, min_clip_sec: float,
-                        max_clip_sec: float, n_cells_total: int) -> list[dict]:
+                        safety_ceiling_sec: float, n_cells_total: int) -> list[dict]:
     """
-    Returns 1 or 2 candidate clip dicts (rare second candidate — see below)
-    fit into [min_clip_sec, max_clip_sec]. Each candidate:
+    Returns 1 or 2 candidate clip dicts (rare second candidate — see below).
+    Runs shorter than min_clip_sec are expanded up to it; runs at or above
+    that keep their NATURAL length uncut, unless they exceed
+    safety_ceiling_sec (rare — a very long unbroken same-event stretch), in
+    which case they're trimmed to their best-scoring window of that length.
+    Each candidate:
         {event, global_start_sec, global_end_sec, duration_sec, peak_score,
          mean_score, source_cell_start, source_cell_end, cells,
          was_expanded, was_trimmed}
     """
     min_cells = round(min_clip_sec / FUSION_GRID_SEC)
-    max_cells = round(max_clip_sec / FUSION_GRID_SEC)
+    safety_ceiling_cells = round(safety_ceiling_sec / FUSION_GRID_SEC)
     run_cells = [all_cells_by_index[i] for i in run["cell_indices"]]
     n_run_cells = len(run_cells)
 
@@ -190,13 +199,13 @@ def fit_run_to_profile(run: dict, all_cells_by_index: dict, min_clip_sec: float,
         cells = [all_cells_by_index[i] for i in range(start, end + 1)]
         return [_make_candidate(cells, was_expanded=True, was_trimmed=False)]
 
-    if n_run_cells > max_cells:
-        start_pos, end_pos = _best_window(run_cells, max_cells)
+    if n_run_cells > safety_ceiling_cells:
+        start_pos, end_pos = _best_window(run_cells, safety_ceiling_cells)
         chosen = run_cells[start_pos:end_pos + 1]
         candidates = [_make_candidate(chosen, was_expanded=False, was_trimmed=True)]
 
         # Optional second candidate from a sufficiently large, separated remainder.
-        if n_run_cells * FUSION_GRID_SEC >= max_clip_sec + 2 * min_clip_sec:
+        if n_run_cells * FUSION_GRID_SEC >= safety_ceiling_sec + 2 * min_clip_sec:
             remainder = run_cells[:start_pos] if start_pos > end_pos - start_pos else run_cells[end_pos + 1:]
             gap_cells_needed = round(MIN_GAP_SEC / FUSION_GRID_SEC)
             if len(remainder) >= min_cells + gap_cells_needed:
@@ -230,7 +239,11 @@ def select_highlight_clips(cells: list[dict], profile: dict, requested_events: l
     Args:
         cells: every fusion cell for the match (fused_event, fused_score,
             cell_index, global_start_sec, global_end_sec), sorted by cell_index.
-        profile: {"budget_sec", "min_clip_sec", "max_clip_sec"} (constants.PROFILES entry).
+        profile: {"budget_sec", "budget_max_sec", "min_clip_sec", "max_clip_sec"}
+            (constants.PROFILES entry). budget_sec is the target total
+            duration; filling may continue past it up to budget_max_sec
+            rather than dropping or cutting a clip that would only slightly
+            overshoot the target.
         requested_events: event classes the user asked for.
         match_duration: total match duration, for boundary clamping.
 
@@ -248,7 +261,7 @@ def select_highlight_clips(cells: list[dict], profile: dict, requested_events: l
     candidates = []
     for run in runs:
         candidates.extend(fit_run_to_profile(
-            run, all_cells_by_index, profile["min_clip_sec"], profile["max_clip_sec"], n_cells_total,
+            run, all_cells_by_index, profile["min_clip_sec"], CLIP_SAFETY_CEILING_SEC, n_cells_total,
         ))
 
     for c in candidates:
@@ -259,6 +272,7 @@ def select_highlight_clips(cells: list[dict], profile: dict, requested_events: l
     selected_ids: set[int] = set()
     running_duration = 0.0
     budget_sec = profile["budget_sec"]
+    budget_ceiling = profile.get("budget_max_sec", budget_sec)
     min_gap_sec = MIN_GAP_SEC
 
     def _try_select(c: dict) -> bool:
@@ -267,7 +281,7 @@ def select_highlight_clips(cells: list[dict], profile: dict, requested_events: l
             return False
         if _overlaps_or_too_close(c, selected, min_gap_sec):
             return False
-        if running_duration + c["duration_sec"] > budget_sec:
+        if running_duration + c["duration_sec"] > budget_ceiling:
             return False
         selected.append(c)
         selected_ids.add(id(c))
@@ -292,7 +306,7 @@ def select_highlight_clips(cells: list[dict], profile: dict, requested_events: l
     selected.sort(key=lambda c: c["global_start_sec"])
 
     logger.info(
-        "Highlight selection: %d candidates -> %d selected (%.1fs / %.1fs budget)",
-        len(candidates), len(selected), running_duration, budget_sec,
+        "Highlight selection: %d candidates -> %d selected (%.1fs, target %.1fs, ceiling %.1fs)",
+        len(candidates), len(selected), running_duration, budget_sec, budget_ceiling,
     )
     return selected

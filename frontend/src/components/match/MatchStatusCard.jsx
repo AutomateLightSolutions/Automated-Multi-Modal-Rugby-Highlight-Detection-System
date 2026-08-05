@@ -20,14 +20,17 @@ const STAGE_ORDER = { uploaded: 0, extracting: 1, processing: 2, done: 3 }
 
 function PipelineStepper({ status }) {
   const isFailed = status === "failed"
+  const isDone = status === "done"
   const current = STAGE_ORDER[status] ?? 0
 
   return (
     <div className="flex items-center gap-2">
       {STAGES.map((stage, i) => {
-        const done = i < current
-        const active = i === current && !isFailed
-        const future = i > current
+        // "done" is a terminal status, not an in-progress stage like the other
+        // three — once reached, every stage (including the last) is complete.
+        const done = isDone ? i <= current : i < current
+        const active = i === current && !isFailed && !isDone
+        const future = !done && !active
         return (
           <div key={stage.key} className="flex items-center">
             <div className="flex flex-col items-center gap-1">
