@@ -32,6 +32,11 @@ class Match(Base):
     # Full word-timestamped Whisper transcript (list of {word, start, end, confidence}),
     # persisted once so the admin page can render it and re-scoring is free.
     transcript: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    # Per-module processing progress, updated periodically (not just once at
+    # the end) so the frontend has something to show during "processing":
+    # {"visual": {"status": "running", "done": 340, "total": 803},
+    #  "audio": {"status": "pending"}, "commentary": {"status": "pending"}}
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     segments: Mapped[list["Segment"]] = relationship(

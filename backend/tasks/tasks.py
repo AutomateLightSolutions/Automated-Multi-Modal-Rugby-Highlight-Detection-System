@@ -14,7 +14,9 @@ from db.crud import (
     sync_create_fusion_run,
     sync_get_match,
     sync_get_module_predictions_by_match,
+    sync_init_match_progress,
     sync_update_highlight_job,
+    sync_update_match_progress,
     sync_update_match_status,
     sync_update_match_transcript,
 )
@@ -48,6 +50,7 @@ def process_match(_self, match_id: str, video_path: str):
 
         # e. Mark as processing
         sync_update_match_status(session, match_id, "processing")
+        sync_init_match_progress(session, match_id)
 
         # f. All three modules run once per match, directly against the
         # extracted visual/audio tracks — no fixed-duration chunk files.
@@ -81,35 +84,53 @@ def process_match(_self, match_id: str, video_path: str):
 # Module tasks — each runs once per match, not per segment
 # ---------------------------------------------------------------------------
 
+PROGRESS_UPDATE_EVERY_N_TILES = 10
+
+
 @app.task(name="tasks.tasks.run_visual_analysis")
 def run_visual_analysis(match_id: str, video_path: str, duration_sec: float) -> dict:
     """Tiled SlowFast analysis over one match's full visual-only track.
     Writes to module_predictions (window_sec=8, one row per tile) and
     visual_window_predictions (the raw 8s/16s/32s audit trail behind each
-    tile's merged prediction)."""
+    tile's merged prediction). Visual is the long pole of the pipeline
+    (hundreds of forward passes per match), so its progress is reported
+    periodically rather than only once at the end."""
     from modules.visual.inference import analyze_match
-
-    result = analyze_match(video_path, duration_sec)
-
-    module_prediction_rows = [
-        {
-            "window_sec": 8,
-            "index_in_module": tile["tile_index"],
-            "global_start_sec": tile["global_start_sec"],
-            "global_end_sec": tile["global_end_sec"],
-            "predicted_event": tile["predicted_event"],
-            "event_confidence": tile["event_confidence"],
-            "highlight_score": tile["highlight_score"],
-            "event_probs": tile["event_probs"],
-            "extra": tile["extra"],
-        }
-        for tile in result["tiles"]
-    ]
 
     session = SyncSessionLocal()
     try:
+        sync_update_match_progress(session, match_id, "visual", status="running", done=0, total=None)
+
+        def _on_progress(done: int, total: int) -> None:
+            if done % PROGRESS_UPDATE_EVERY_N_TILES == 0 or done == total:
+                sync_update_match_progress(session, match_id, "visual", status="running", done=done, total=total)
+
+        result = analyze_match(video_path, duration_sec, on_progress=_on_progress)
+
+        module_prediction_rows = [
+            {
+                "window_sec": 8,
+                "index_in_module": tile["tile_index"],
+                "global_start_sec": tile["global_start_sec"],
+                "global_end_sec": tile["global_end_sec"],
+                "predicted_event": tile["predicted_event"],
+                "event_confidence": tile["event_confidence"],
+                "highlight_score": tile["highlight_score"],
+                "event_probs": tile["event_probs"],
+                "extra": tile["extra"],
+            }
+            for tile in result["tiles"]
+        ]
         sync_bulk_create_module_predictions(session, match_id, "visual", module_prediction_rows)
         sync_bulk_create_visual_window_predictions(session, match_id, result["raw_windows"])
+
+        sync_update_match_progress(
+            session, match_id, "visual",
+            status="done", done=len(result["tiles"]), total=len(result["tiles"]),
+        )
+    except Exception:
+        sync_update_match_progress(session, match_id, "visual", status="failed")
+        raise
     finally:
         session.close()
 
@@ -122,25 +143,31 @@ def run_audio_energy_analysis(match_id: str, audio_path: str, duration_sec: floa
     Writes to module_predictions (window_sec=4, one row per grid cell)."""
     from modules.audio_energy.scorer import analyze_match
 
-    result = analyze_match(audio_path, duration_sec)
-
-    module_prediction_rows = [
-        {
-            "window_sec": 4,
-            "index_in_module": cell["cell_index"],
-            "global_start_sec": cell["global_start_sec"],
-            "global_end_sec": cell["global_end_sec"],
-            "predicted_event": cell["predicted_event"],
-            "event_confidence": cell["event_confidence"],
-            "highlight_score": cell["highlight_score"],
-            "extra": cell["extra"],
-        }
-        for cell in result["cells"]
-    ]
-
     session = SyncSessionLocal()
     try:
+        sync_update_match_progress(session, match_id, "audio", status="running")
+
+        result = analyze_match(audio_path, duration_sec)
+
+        module_prediction_rows = [
+            {
+                "window_sec": 4,
+                "index_in_module": cell["cell_index"],
+                "global_start_sec": cell["global_start_sec"],
+                "global_end_sec": cell["global_end_sec"],
+                "predicted_event": cell["predicted_event"],
+                "event_confidence": cell["event_confidence"],
+                "highlight_score": cell["highlight_score"],
+                "extra": cell["extra"],
+            }
+            for cell in result["cells"]
+        ]
         sync_bulk_create_module_predictions(session, match_id, "audio", module_prediction_rows)
+
+        sync_update_match_progress(session, match_id, "audio", status="done")
+    except Exception:
+        sync_update_match_progress(session, match_id, "audio", status="failed")
+        raise
     finally:
         session.close()
 
@@ -155,26 +182,32 @@ def run_commentary_analysis(match_id: str, audio_path: str, duration_sec: float,
     word-timestamped transcript onto the match row."""
     from modules.commentary.scorer import analyze_match
 
-    result = analyze_match(audio_path, duration_sec, lag_sec=lag_sec)
-
-    module_prediction_rows = [
-        {
-            "window_sec": 4,
-            "index_in_module": cell["cell_index"],
-            "global_start_sec": cell["global_start_sec"],
-            "global_end_sec": cell["global_end_sec"],
-            "predicted_event": cell["predicted_event"],
-            "event_confidence": cell["event_confidence"],
-            "highlight_score": cell["highlight_score"],
-            "extra": cell["extra"],
-        }
-        for cell in result["cells"]
-    ]
-
     session = SyncSessionLocal()
     try:
+        sync_update_match_progress(session, match_id, "commentary", status="running")
+
+        result = analyze_match(audio_path, duration_sec, lag_sec=lag_sec)
+
+        module_prediction_rows = [
+            {
+                "window_sec": 4,
+                "index_in_module": cell["cell_index"],
+                "global_start_sec": cell["global_start_sec"],
+                "global_end_sec": cell["global_end_sec"],
+                "predicted_event": cell["predicted_event"],
+                "event_confidence": cell["event_confidence"],
+                "highlight_score": cell["highlight_score"],
+                "extra": cell["extra"],
+            }
+            for cell in result["cells"]
+        ]
         sync_bulk_create_module_predictions(session, match_id, "commentary", module_prediction_rows)
         sync_update_match_transcript(session, match_id, result["transcript"])
+
+        sync_update_match_progress(session, match_id, "commentary", status="done")
+    except Exception:
+        sync_update_match_progress(session, match_id, "commentary", status="failed")
+        raise
     finally:
         session.close()
 

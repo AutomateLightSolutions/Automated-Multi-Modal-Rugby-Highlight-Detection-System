@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { ListVideo, X } from "lucide-react"
@@ -88,11 +88,23 @@ export default function MatchesPage() {
     setShowUploadDrawer(false)
   }
 
-  const handleStatusChange = (matchId, status) => {
-    setMatches((prev) =>
-      prev.map((m) => (m.match_id === matchId ? { ...m, status } : m))
-    )
-  }
+  // Stable reference (empty deps — only uses the functional setState form) so
+  // it can safely sit in a child's useEffect dependency array without
+  // retriggering that effect on every render.
+  const handleStatusChange = useCallback((matchId, status) => {
+    setMatches((prev) => {
+      const match = prev.find((m) => m.match_id === matchId)
+      if (match?.status === status) return prev // bail out — no-op update would still re-render
+      return prev.map((m) => (m.match_id === matchId ? { ...m, status } : m))
+    })
+  }, [])
+
+  // Also memoized (not an inline arrow in the JSX below) for the same reason —
+  // MatchStatusCard depends on this reference in its own useEffect.
+  const handleMatchStatusChange = useCallback(
+    (status) => handleStatusChange(selectedId, status),
+    [selectedId, handleStatusChange],
+  )
 
   return (
     <PageWrapper>
@@ -122,7 +134,7 @@ export default function MatchesPage() {
                 >
                   <MatchStatusCard
                     matchId={selectedId}
-                    onStatusChange={(status) => handleStatusChange(selectedId, status)}
+                    onStatusChange={handleMatchStatusChange}
                   />
                 </motion.div>
               </AnimatePresence>

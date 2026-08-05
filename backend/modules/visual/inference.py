@@ -68,9 +68,16 @@ def _run_window(model: RugbyVisualClassifier, device: torch.device,
     }
 
 
-def analyze_match(video_path: str, duration_sec: float) -> dict:
+def analyze_match(video_path: str, duration_sec: float, on_progress=None) -> dict:
     """
     Run the full tiled SlowFast analysis over one match's visual-only track.
+
+    Args:
+        on_progress: optional callback(tiles_done: int, tiles_total: int),
+            invoked after each tile — visual is the long pole of the whole
+            pipeline (hundreds of forward passes per match), so this is
+            what gives the frontend something real to show during
+            "processing" instead of a static spinner.
 
     Returns:
         {
@@ -86,6 +93,7 @@ def analyze_match(video_path: str, duration_sec: float) -> dict:
     device = get_device()
 
     tiles = tile_match(duration_sec)
+    tiles_total = len(tiles)
     tile_records = []
     raw_window_records = []
 
@@ -136,5 +144,8 @@ def analyze_match(video_path: str, duration_sec: float) -> dict:
             merged["predicted_event"], merged["event_confidence"], merged["merged_score"],
             merged["windows_dropped"], merged["fallback_used"],
         )
+
+        if on_progress:
+            on_progress(tile["tile_index"] + 1, tiles_total)
 
     return {"tiles": tile_records, "raw_windows": raw_window_records}
