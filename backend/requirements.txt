@@ -31,6 +31,16 @@ fvcore==0.1.5.post20221221  # pytorchvideo runtime dependency
 iopath==0.1.10               # pytorchvideo runtime dependency
 av==12.3.0            # PyAV — frame sampling for SlowFast clips (modules/visual/preprocessing.py)
 openai-whisper==20231117
+# DualHeadRoBERTa checkpoint loading (modules/commentary/model.py). Needs a
+# recent transformers/tokenizers: older tokenizers releases (e.g. 0.19.x,
+# bundled by transformers==4.x) fail to parse tokenizer.json files saved by
+# newer `tokenizers` versions ("data did not match any variant of untagged
+# enum ModelWrapper") — confirmed against a real fine-tuned checkpoint.
+transformers==5.14.1
+tokenizers==0.22.2
+safetensors==0.8.0    # model.safetensors checkpoint format
+sentencepiece==0.2.0  # tokenizer backend needed by some transformer checkpoints (e.g. DeBERTa)
+protobuf==4.25.3      # sentencepiece runtime dependency
 librosa==0.10.2
 numpy==1.26.4
 opencv-python==4.9.0.80
