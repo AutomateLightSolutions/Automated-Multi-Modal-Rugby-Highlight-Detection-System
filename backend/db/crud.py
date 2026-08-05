@@ -37,6 +37,30 @@ def sync_update_match_transcript(session: Session, match_id: str, transcript: li
         session.commit()
 
 
+def sync_init_match_progress(session: Session, match_id: str) -> None:
+    match = session.get(Match, uuid.UUID(match_id))
+    if match:
+        match.progress = {
+            "visual": {"status": "pending"},
+            "audio": {"status": "pending"},
+            "commentary": {"status": "pending"},
+        }
+        session.commit()
+
+
+def sync_update_match_progress(session: Session, match_id: str, module: str, **fields) -> None:
+    """Merge fields into one module's progress sub-dict, preserving the
+    others. Reassigns the whole dict rather than mutating in place —
+    SQLAlchemy only detects JSON-column changes on attribute reassignment."""
+    match = session.get(Match, uuid.UUID(match_id))
+    if not match:
+        return
+    progress = dict(match.progress or {})
+    progress[module] = {**progress.get(module, {}), **fields}
+    match.progress = progress
+    session.commit()
+
+
 def sync_create_segment(
     session: Session,
     match_id: str,

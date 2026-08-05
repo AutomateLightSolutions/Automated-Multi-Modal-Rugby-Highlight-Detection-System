@@ -75,6 +75,7 @@ async def list_matches(
             duration_sec=match.duration_sec,
             fps=match.fps,
             created_at=match.created_at,
+            progress=match.progress,
         )
         for match in matches
     ]
@@ -138,4 +139,5 @@ async def get_match_status(
         duration_sec=match.duration_sec,
         fps=match.fps,
         created_at=match.created_at,
+        progress=match.progress,
     )

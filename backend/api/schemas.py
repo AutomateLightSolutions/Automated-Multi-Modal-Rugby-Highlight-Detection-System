@@ -58,6 +58,7 @@ class MatchStatusResponse(BaseModel):
     duration_sec: Optional[float] = None
     fps: Optional[float] = None
     created_at: datetime
+    progress: Optional[dict] = None
 
 
 class HighlightJobSummary(BaseModel):

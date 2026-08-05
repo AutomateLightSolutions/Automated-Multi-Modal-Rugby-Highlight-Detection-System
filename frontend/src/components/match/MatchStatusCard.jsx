@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { CheckCircle, Loader2, AlertCircle, XCircle } from "lucide-react"
+import { CheckCircle, Loader2, AlertCircle, XCircle, Circle } from "lucide-react"
 import { useMatchPolling } from "../../hooks/useMatchPolling"
 import { getMatchHighlights } from "../../lib/api"
 import StatusBadge from "../ui/StatusBadge"
@@ -74,6 +74,61 @@ function PipelineStepper({ status }) {
   )
 }
 
+const MODULE_LABELS = { visual: "Visual Analysis", commentary: "Commentary", audio: "Audio Energy" }
+const MODULE_ORDER = ["visual", "commentary", "audio"]
+
+function ModuleProgressRow({ moduleKey, info }) {
+  const status = info?.status ?? "pending"
+  const done = info?.done
+  const total = info?.total
+  const pct = done != null && total ? Math.round((done / total) * 100) : null
+
+  const icon =
+    status === "done" ? <CheckCircle size={13} className="text-accent-emerald" />
+    : status === "failed" ? <XCircle size={13} className="text-red-400" />
+    : status === "running" ? <Loader2 size={13} className="text-accent-indigo animate-spin" />
+    : <Circle size={13} className="text-text-muted" />
+
+  const statusLabel =
+    status === "running" && pct != null ? `${done}/${total} tiles · ${pct}%`
+    : status === "running" ? "Running…"
+    : status === "done" ? "Complete"
+    : status === "failed" ? "Failed"
+    : "Pending"
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="flex items-center gap-2 text-text-secondary font-medium">
+          {icon} {MODULE_LABELS[moduleKey] ?? moduleKey}
+        </span>
+        <span className={`font-mono ${status === "failed" ? "text-red-400" : "text-text-muted"}`}>
+          {statusLabel}
+        </span>
+      </div>
+      {status === "running" && pct != null && (
+        <div className="h-1.5 rounded-full overflow-hidden bg-bg-tertiary">
+          <div
+            className="h-full bg-accent-indigo rounded-full transition-all duration-500"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProcessingProgress({ progress }) {
+  if (!progress) return null
+  return (
+    <div className="space-y-3 pt-3 border-t border-border">
+      {MODULE_ORDER.map((key) => (
+        <ModuleProgressRow key={key} moduleKey={key} info={progress[key]} />
+      ))}
+    </div>
+  )
+}
+
 export default function MatchStatusCard({ matchId, onStatusChange }) {
   const { data, isLoading, isError } = useMatchPolling(matchId)
   const [jobs, setJobs] = useState([])
@@ -131,6 +186,8 @@ export default function MatchStatusCard({ matchId, onStatusChange }) {
       </div>
 
       <PipelineStepper status={data.status} />
+
+      {data.status === "processing" && <ProcessingProgress progress={data.progress} />}
 
       {data.status === "done" && (
         <motion.div
