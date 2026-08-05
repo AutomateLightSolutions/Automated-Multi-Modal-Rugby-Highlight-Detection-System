@@ -20,9 +20,16 @@ pydantic-settings==2.2.1
 python-dotenv==1.0.1
 
 # ML / Media
+# GPU build: install these three from the CUDA 12.1 wheel index instead of
+# plain PyPI so torch.cuda.is_available() is True —
+#   pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 torch==2.3.0
 torchaudio==2.3.0
 torchvision==0.18.0
+pytorchvideo==0.1.5   # SlowFast R50 backbone factory (modules/visual/model.py)
+fvcore==0.1.5.post20221221  # pytorchvideo runtime dependency
+iopath==0.1.10               # pytorchvideo runtime dependency
+av==12.3.0            # PyAV — frame sampling for SlowFast clips (modules/visual/preprocessing.py)
 openai-whisper==20231117
 librosa==0.10.2
 numpy==1.26.4

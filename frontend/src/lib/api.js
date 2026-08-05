@@ -49,4 +49,18 @@ export const getStorageStatus = (matchId) =>
 export const downloadHighlight = (jobId) =>
   `${api.defaults.baseURL}/highlights/download/${jobId}`
 
+export const adminListMatches = () =>
+  api.get("/admin/matches")
+
+export const adminGetMatch = (matchId) =>
+  api.get(`/admin/matches/${matchId}`)
+
+export const adminGetTimeline = (matchId, fusionRunId) =>
+  api.get(`/admin/matches/${matchId}/timeline`, {
+    params: fusionRunId ? { fusion_run_id: fusionRunId } : {},
+  })
+
+export const adminVideoUrl = (matchId) =>
+  `${api.defaults.baseURL}/admin/matches/${matchId}/video`
+
 export default api

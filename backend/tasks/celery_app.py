@@ -34,11 +34,11 @@ app.conf.update(
     task_soft_time_limit=3300,  # raise SoftTimeLimitExceeded at 55 min → task can mark match as failed
     task_time_limit=3600,       # hard kill at 60 min if soft limit was ignored
     task_routes={
-        "tasks.tasks.run_visual_module":       {"queue": "ml"},
-        "tasks.tasks.run_commentary_module":   {"queue": "ml"},
-        "tasks.tasks.run_audio_energy_module": {"queue": "ml"},
-        "tasks.tasks.run_fusion":              {"queue": "fusion"},
-        "tasks.tasks.generate_highlight":      {"queue": "default"},
-        "tasks.tasks.process_match":           {"queue": "default"},
+        "tasks.tasks.run_visual_analysis":        {"queue": "ml"},
+        "tasks.tasks.run_commentary_analysis":    {"queue": "ml"},
+        "tasks.tasks.run_audio_energy_analysis":  {"queue": "ml"},
+        "tasks.tasks.fuse_match":                 {"queue": "fusion"},
+        "tasks.tasks.generate_highlight":         {"queue": "default"},
+        "tasks.tasks.process_match":              {"queue": "default"},
     },
 )

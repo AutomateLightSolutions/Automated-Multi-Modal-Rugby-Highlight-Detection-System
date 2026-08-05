@@ -5,6 +5,8 @@ import Navbar from "./components/layout/Navbar"
 import HomePage from "./pages/HomePage"
 import MatchesPage from "./pages/MatchesPage"
 import AboutPage from "./pages/AboutPage"
+import AdminMatchesPage from "./pages/AdminMatchesPage"
+import AdminMatchDetailPage from "./pages/AdminMatchDetailPage"
 import ErrorBoundary from "./components/ErrorBoundary"
 
 const queryClient = new QueryClient({
@@ -22,6 +24,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/matches" element={<MatchesPage />} />
+            <Route path="/admin" element={<AdminMatchesPage />} />
+            <Route path="/admin/matches/:matchId" element={<AdminMatchDetailPage />} />
             <Route path="/about" element={<AboutPage />} />
           </Routes>
         </ErrorBoundary>

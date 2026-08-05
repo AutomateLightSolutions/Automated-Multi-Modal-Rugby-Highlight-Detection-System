@@ -15,3 +15,10 @@ Thumbs.db
 
 # Logs (anywhere in the repo)
 *.log
+
+# ── Model checkpoints (large binaries — never commit, exceed GitHub's 100MB limit) ──
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx

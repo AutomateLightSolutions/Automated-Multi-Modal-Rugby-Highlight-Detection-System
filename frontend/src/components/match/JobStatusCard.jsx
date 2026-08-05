@@ -8,7 +8,7 @@ import toast from "react-hot-toast"
 import { useJobPolling } from "../../hooks/useJobPolling"
 import { downloadHighlight, deleteHighlight } from "../../lib/api"
 import LoadingSpinner from "../ui/LoadingSpinner"
-import SegmentsTable from "./SegmentsTable"
+import ClipsTable from "./ClipsTable"
 import Timeline from "../ui/Timeline"
 import { EVENT_TYPE_LABELS, HIGHLIGHT_TYPES } from "../../constants/highlights"
 
@@ -170,7 +170,7 @@ export default function JobStatusCard({ jobId, isLatest = true, onDeleted }) {
               {highlightTypeLabel(data.highlight_type)} · {eventBadges.map((ev) => EVENT_TYPE_LABELS[ev] ?? ev).join(", ")}
             </span>
             <span className="text-xs text-text-muted shrink-0">
-              {data.segments?.length ?? 0} clips
+              {data.clips?.length ?? 0} clips
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -200,7 +200,7 @@ export default function JobStatusCard({ jobId, isLatest = true, onDeleted }) {
               <div>
                 <p className="font-semibold text-text-primary">Highlight Ready</p>
                 <p className="text-xs text-text-secondary">
-                  {highlightTypeLabel(data.highlight_type)} · {data.segments?.length ?? 0} segments selected
+                  {highlightTypeLabel(data.highlight_type)} · {data.clips?.length ?? 0} clips selected
                 </p>
               </div>
             </div>
@@ -253,19 +253,19 @@ export default function JobStatusCard({ jobId, isLatest = true, onDeleted }) {
             />
           )}
 
-          {data.segments?.length > 0 && (
+          {data.clips?.length > 0 && (
             <>
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-text-muted mb-3 uppercase tracking-wider font-semibold">
                   Match Timeline
                 </p>
-                <Timeline segments={data.segments} />
+                <Timeline clips={data.clips} />
               </div>
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-text-muted mb-3 uppercase tracking-wider font-semibold">
-                  Segments
+                  Clips
                 </p>
-                <SegmentsTable segments={data.segments} />
+                <ClipsTable clips={data.clips} />
               </div>
             </>
           )}
