@@ -5,7 +5,7 @@ Registers all routers and configures middleware.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import admin, highlights, models, upload
+from api.routes import admin, highlights, upload
 
 app = FastAPI(
     title="Rugby Highlight Generator",
@@ -24,7 +24,6 @@ app.add_middleware(
 app.include_router(upload.router, prefix="/api/v1", tags=["upload"])
 app.include_router(highlights.router, prefix="/api/v1", tags=["highlights"])
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
-app.include_router(models.router, prefix="/api/v1", tags=["models"])
 
 
 @app.get("/health", tags=["system"])

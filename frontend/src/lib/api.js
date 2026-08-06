@@ -63,22 +63,4 @@ export const adminGetTimeline = (matchId, fusionRunId) =>
 export const adminVideoUrl = (matchId) =>
   `${api.defaults.baseURL}/admin/matches/${matchId}/video`
 
-export const uploadModel = (module, modelFile, lexiconFile, onProgress) => {
-  const form = new FormData()
-  form.append("module", module)
-  form.append("model_file", modelFile)
-  if (lexiconFile) form.append("lexicon_file", lexiconFile)
-  return api.post("/admin/models/upload", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-    timeout: 0, // no timeout — checkpoint files can be several hundred MB
-    onUploadProgress: (e) => {
-      const pct = Math.round((e.loaded * 100) / e.total)
-      onProgress?.(pct)
-    },
-  })
-}
-
-export const getModelStatus = () =>
-  api.get("/admin/models/status")
-
 export default api

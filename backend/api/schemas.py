@@ -71,25 +71,3 @@ class HighlightJobSummary(BaseModel):
     created_at: datetime
 
 
-class ModelUploadResponse(BaseModel):
-    model_config = {"protected_namespaces": ()}
-
-    module: str
-    model_installed: bool
-    lexicon_installed: Optional[bool] = None
-    message: str
-
-
-class ModuleModelStatus(BaseModel):
-    model_config = {"protected_namespaces": ()}
-
-    model_installed: bool
-    lexicon_installed: Optional[bool] = None
-    uploaded_at: Optional[datetime] = None
-    original_filename: Optional[str] = None
-    lexicon_uploaded_at: Optional[datetime] = None
-    lexicon_original_filename: Optional[str] = None
-
-
-class ModelStatusResponse(BaseModel):
-    modules: dict[str, ModuleModelStatus]
