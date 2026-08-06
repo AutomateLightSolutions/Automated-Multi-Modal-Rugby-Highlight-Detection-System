@@ -1,9 +1,17 @@
 """
 78-dimensional feature extraction for the audio_energy event/highlight
-models. Exact feature order (and the shared-STFT computation) matches the
-models' training pipeline — both are load-bearing: the models take a plain
-positional vector, not named features, and reordering silently produces
-garbage predictions.
+models — ported line-for-line from the training pipeline's
+feature_extraction.py so inference features match training exactly (the
+models are extremely sensitive to this: e.g. computing RMS/MFCC from the
+shared STFT instead of the raw waveform, or skipping the per-frame
+nan_to_num on spectral_contrast before averaging, silently produces
+features tens of standard deviations outside the trained scaler's range and
+collapses the classifier to one constant prediction).
+
+Only the entry point differs from the training pipeline: this project has
+no on-disk per-chunk WAV files (each match has one full audio track), so
+extract_features() takes an already-loaded waveform slice instead of a
+chunk path.
 
 Feature order:
     1.  rms_mean, rms_std                              (2)
@@ -35,13 +43,70 @@ N_MFCC = 13
 FEATURE_DIM = 78
 
 
-def _mean_std(x: np.ndarray) -> tuple[float, float]:
-    return float(np.mean(x)), float(np.std(x))
+def compute_spectrum(y: np.ndarray) -> np.ndarray:
+    """Magnitude STFT — shared by the spectral (not time-domain/cepstral) features below."""
+    return np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH))
+
+
+def _extract_rms(y: np.ndarray) -> np.ndarray:
+    rms = librosa.feature.rms(y=y, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(rms), np.std(rms)])
+
+
+def _extract_zcr(y: np.ndarray) -> np.ndarray:
+    zcr = librosa.feature.zero_crossing_rate(y, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(zcr), np.std(zcr)])
+
+
+def _extract_spectral_centroid(S: np.ndarray, sr: int) -> np.ndarray:
+    centroid = librosa.feature.spectral_centroid(S=S, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(centroid), np.std(centroid)])
+
+
+def _extract_spectral_bandwidth(S: np.ndarray, sr: int) -> np.ndarray:
+    bandwidth = librosa.feature.spectral_bandwidth(S=S, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(bandwidth), np.std(bandwidth)])
+
+
+def _extract_spectral_rolloff(S: np.ndarray, sr: int) -> np.ndarray:
+    rolloff = librosa.feature.spectral_rolloff(S=S, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(rolloff), np.std(rolloff)])
+
+
+def _extract_spectral_contrast(S: np.ndarray, sr: int) -> np.ndarray:
+    contrast = librosa.feature.spectral_contrast(S=S, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)
+    contrast = np.nan_to_num(contrast)  # must happen before averaging, not just at the end
+    return np.concatenate([np.mean(contrast, axis=1), np.std(contrast, axis=1)])
+
+
+def _extract_spectral_flatness(S: np.ndarray) -> np.ndarray:
+    flatness = librosa.feature.spectral_flatness(S=S, n_fft=N_FFT, hop_length=HOP_LENGTH)[0]
+    return np.array([np.mean(flatness), np.std(flatness)])
+
+
+def _delta_width(n_frames: int) -> int:
+    """Largest odd window <= 9 that librosa.feature.delta can use for n_frames."""
+    width = min(9, n_frames if n_frames % 2 == 1 else n_frames - 1)
+    return max(width, 3)
+
+
+def _extract_mfccs(mfccs: np.ndarray) -> np.ndarray:
+    return np.concatenate([np.mean(mfccs, axis=1), np.std(mfccs, axis=1)])
+
+
+def _extract_delta_mfccs(mfccs: np.ndarray) -> np.ndarray:
+    n_frames = mfccs.shape[1]
+    if n_frames < 3:
+        delta = np.zeros_like(mfccs)
+    else:
+        delta = librosa.feature.delta(mfccs, width=_delta_width(n_frames))
+    return np.concatenate([np.mean(delta, axis=1), np.std(delta, axis=1)])
 
 
 def extract_features(y: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray | None:
     """
-    Extract the 78-dim feature vector for one audio chunk.
+    Extract the 78-dim feature vector for one audio chunk (an in-memory
+    waveform slice — this pipeline has no on-disk per-chunk files).
 
     Returns None — never a zero vector — if the chunk is empty/silent or
     extraction raises; callers must skip such chunks rather than feed zeros
@@ -51,56 +116,28 @@ def extract_features(y: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray | None:
         return None
 
     try:
-        # Magnitude spectrogram, shared by every spectral feature below —
-        # computing it once instead of per-feature is the main cost saving.
-        S = np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH))
+        S = compute_spectrum(y)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC, n_fft=N_FFT, hop_length=HOP_LENGTH)
 
-        values: list[float] = []
+        feature_vector = np.concatenate([
+            _extract_rms(y),
+            _extract_zcr(y),
+            _extract_spectral_centroid(S, sr),
+            _extract_spectral_bandwidth(S, sr),
+            _extract_spectral_rolloff(S, sr),
+            _extract_spectral_contrast(S, sr),
+            _extract_spectral_flatness(S),
+            _extract_mfccs(mfccs),
+            _extract_delta_mfccs(mfccs),
+        ])
 
-        rms = librosa.feature.rms(S=S)[0]
-        values.extend(_mean_std(rms))
+        feature_vector = np.nan_to_num(feature_vector, nan=0.0, posinf=0.0, neginf=0.0)
 
-        zcr = librosa.feature.zero_crossing_rate(y=y, frame_length=N_FFT, hop_length=HOP_LENGTH)[0]
-        values.extend(_mean_std(zcr))
-
-        centroid = librosa.feature.spectral_centroid(S=S, sr=sr)[0]
-        values.extend(_mean_std(centroid))
-
-        bandwidth = librosa.feature.spectral_bandwidth(S=S, sr=sr)[0]
-        values.extend(_mean_std(bandwidth))
-
-        rolloff = librosa.feature.spectral_rolloff(S=S, sr=sr)[0]
-        values.extend(_mean_std(rolloff))
-
-        contrast = librosa.feature.spectral_contrast(S=S, sr=sr)  # (7, n_frames): bands 0..6
-        for band in contrast:
-            values.append(float(np.mean(band)))
-        for band in contrast:
-            values.append(float(np.std(band)))
-
-        flatness = librosa.feature.spectral_flatness(S=S)[0]
-        values.extend(_mean_std(flatness))
-
-        mel_power = librosa.feature.melspectrogram(S=S ** 2, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)
-        mfcc = librosa.feature.mfcc(S=librosa.power_to_db(mel_power), sr=sr, n_mfcc=N_MFCC)
-        delta_mfcc = librosa.feature.delta(mfcc)
-
-        for coeff in mfcc:
-            values.append(float(np.mean(coeff)))
-        for coeff in mfcc:
-            values.append(float(np.std(coeff)))
-        for coeff in delta_mfcc:
-            values.append(float(np.mean(coeff)))
-        for coeff in delta_mfcc:
-            values.append(float(np.std(coeff)))
-
-        vector = np.nan_to_num(np.array(values, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
-
-        if vector.shape[0] != FEATURE_DIM:
-            logger.error("Feature vector has %d dims, expected %d", vector.shape[0], FEATURE_DIM)
+        if feature_vector.shape[0] != FEATURE_DIM:
+            logger.error("Feature vector has %d dims, expected %d", feature_vector.shape[0], FEATURE_DIM)
             return None
 
-        return vector
+        return feature_vector
     except Exception:
         logger.exception("Feature extraction failed for a chunk")
         return None

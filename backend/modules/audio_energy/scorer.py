@@ -10,12 +10,10 @@ modules.grid.compute_grid_cells), so no de-overlap averaging step is needed
 here, unlike the commentary module.
 
 Unlike this module's previous RMS-only implementation, this one does set
-predicted_event / event_confidence. Note fusion (fusion/grid_fusion.py)
-currently only factors audio's highlight_score into the fused score and
-disagreement check — fused_event is still decided from visual+commentary
-alone. Audio's predicted_event is stored for the admin timeline but is not
-yet a fusion input; wiring it in is a deliberate fusion-weighting decision,
-not made here.
+predicted_event / event_confidence — fusion (fusion/grid_fusion.py) folds
+audio in as a third weighted vote alongside visual and commentary when
+deciding fused_event, in addition to using its highlight_score for the
+fused score and disagreement check.
 """
 import logging
 
