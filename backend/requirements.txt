@@ -33,6 +33,9 @@ av==12.3.0            # PyAV — frame sampling for SlowFast clips (modules/visu
 openai-whisper==20231117
 librosa==0.10.2
 numpy==1.26.4
+scikit-learn==1.9.0    # audio_energy event/highlight models (modules/audio_energy)
+joblib==1.5.3           # loads the .pkl model/scaler artifacts
+xgboost==3.2.0          # audio_energy highlight regressor
 opencv-python==4.9.0.80
 ffmpeg-python==0.2.0
 moviepy==1.0.3

@@ -91,7 +91,12 @@ def extract_media(
     subprocess.run(
         [
             "ffmpeg", "-y", "-i", video_path,
-            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+            # 22050 Hz, not 16000 — the audio_energy models need real content
+            # up to ~11kHz (spectral_contrast's top band lands right there;
+            # at 16000 Hz that band is past the 8kHz Nyquist limit and just
+            # measures resampling noise). Whisper doesn't need this file at
+            # 16000 either — it resamples internally regardless of input rate.
+            "-vn", "-acodec", "pcm_s16le", "-ar", "22050", "-ac", "1",
             str(audio_path),
         ],
         check=True,

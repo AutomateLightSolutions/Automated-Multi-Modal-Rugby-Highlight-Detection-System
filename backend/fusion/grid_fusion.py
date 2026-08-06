@@ -33,9 +33,11 @@ def _sigmoid(x: float, k: float = SIGMOID_K, x0: float = 0.5) -> float:
     return 1.0 / (1.0 + math.exp(-k * (x - x0)))
 
 
-def _commentary_probs(row: dict) -> np.ndarray:
+def _event_probs_from_prediction(row: dict) -> np.ndarray:
     """One-hot on predicted_event scaled by event_confidence, with the
-    residual mass placed on normal_play."""
+    residual mass placed on normal_play. Used for commentary and audio —
+    unlike visual's softmax, neither gives a full probability vector, just
+    one best guess plus a confidence heuristic."""
     vec = np.zeros(len(EVENT_CLASSES))
     idx = _CLASS_INDEX.get(row.get("predicted_event"), _NORMAL_PLAY_IDX)
     confidence = row.get("event_confidence") or 0.0
@@ -44,24 +46,19 @@ def _commentary_probs(row: dict) -> np.ndarray:
     return vec
 
 
-def fuse_cell(cell_index: int, visual_row: dict | None, commentary_row: dict | None,
-              audio_row: dict | None, weights: dict = DEFAULT_WEIGHTS) -> dict:
-    """
-    Fuse one grid cell's per-module rows into a fused score/event.
+_MODULE_ROWS = ("visual", "commentary", "audio")
 
-    Each *_row (if present) is a plain dict with at least "highlight_score";
-    visual_row additionally needs "event_probs" (10-dim), commentary_row
-    needs "predicted_event"/"event_confidence".
 
-    Returns: {cell_index, fused_event, fused_event_confidence, fused_score,
-              contributions, modules_present, disagreement}
-    """
+def _score_contributions(rows_by_module: dict[str, dict | None], weights: dict) -> tuple[float, dict, list[str]]:
+    """Weighted-average sigmoid(highlight_score) across present modules, plus
+    the per-module contributions dict the fusion_cells row stores verbatim."""
     modules_present = []
     score_num = 0.0
     score_den = 0.0
     contributions = {}
 
-    for module_name, row in [("visual", visual_row), ("commentary", commentary_row), ("audio", audio_row)]:
+    for module_name in _MODULE_ROWS:
+        row = rows_by_module[module_name]
         weight = weights[module_name]
         if row is not None:
             modules_present.append(module_name)
@@ -84,40 +81,82 @@ def fuse_cell(cell_index: int, visual_row: dict | None, commentary_row: dict | N
             }
 
     fused_score = score_num / score_den if score_den > 0 else 0.0
+    return fused_score, contributions, modules_present
 
-    # Fused event: visual + commentary only — audio never sets an event —
-    # renormalized over whichever of the two are actually present.
-    w_visual = weights["visual"] if visual_row is not None else 0.0
-    w_commentary = weights["commentary"] if commentary_row is not None else 0.0
-    event_weight_total = w_visual + w_commentary
 
-    if event_weight_total > 0:
-        visual_probs = (
-            np.array(visual_row["event_probs"]) if visual_row is not None else np.zeros(len(EVENT_CLASSES))
-        )
-        commentary_probs = (
-            _commentary_probs(commentary_row) if commentary_row is not None else np.zeros(len(EVENT_CLASSES))
-        )
-        event_vec = (w_visual * visual_probs + w_commentary * commentary_probs) / event_weight_total
-    else:
+def _fused_event(rows_by_module: dict[str, dict | None], weights: dict) -> tuple[str, float]:
+    """Weighted vote over visual's softmax + commentary/audio's one-hot
+    guesses, renormalized over whichever modules are present. Visual gives a
+    full probability vector; commentary and audio each give one best guess
+    plus a confidence heuristic (_event_probs_from_prediction)."""
+    active_weights = {
+        module: weights[module] for module in _MODULE_ROWS if rows_by_module[module] is not None
+    }
+    event_weight_total = sum(active_weights.values())
+
+    if event_weight_total == 0:
         event_vec = np.zeros(len(EVENT_CLASSES))
         event_vec[_NORMAL_PLAY_IDX] = 1.0
+    else:
+        visual_row = rows_by_module["visual"]
+        visual_probs = np.array(visual_row["event_probs"]) if visual_row is not None else np.zeros(len(EVENT_CLASSES))
+        commentary_probs = (
+            _event_probs_from_prediction(rows_by_module["commentary"])
+            if rows_by_module["commentary"] is not None else np.zeros(len(EVENT_CLASSES))
+        )
+        audio_probs = (
+            _event_probs_from_prediction(rows_by_module["audio"])
+            if rows_by_module["audio"] is not None else np.zeros(len(EVENT_CLASSES))
+        )
+        event_vec = (
+            active_weights.get("visual", 0.0) * visual_probs
+            + active_weights.get("commentary", 0.0) * commentary_probs
+            + active_weights.get("audio", 0.0) * audio_probs
+        ) / event_weight_total
 
     best_idx = int(np.argmax(event_vec))
-    fused_event = EVENT_CLASSES[best_idx]
-    fused_event_confidence = float(event_vec[best_idx])
+    return EVENT_CLASSES[best_idx], float(event_vec[best_idx])
 
-    disagreement = False
+
+def _check_disagreement(rows_by_module: dict[str, dict | None]) -> bool:
+    """True if visual and commentary call different (non-normal_play)
+    events, or if visual and audio's excitement scores diverge sharply."""
+    visual_row = rows_by_module["visual"]
+    commentary_row = rows_by_module["commentary"]
+    audio_row = rows_by_module["audio"]
+
     if visual_row is not None and commentary_row is not None:
         v_event = visual_row.get("predicted_event")
         c_event = commentary_row.get("predicted_event")
         if v_event != "normal_play" and c_event != "normal_play" and v_event != c_event:
-            disagreement = True
+            return True
+
     if visual_row is not None and audio_row is not None:
         v_sig = _sigmoid(visual_row["highlight_score"])
         a_sig = _sigmoid(audio_row["highlight_score"])
         if abs(v_sig - a_sig) > DISAGREEMENT_SCORE_GAP:
-            disagreement = True
+            return True
+
+    return False
+
+
+def fuse_cell(cell_index: int, visual_row: dict | None, commentary_row: dict | None,
+              audio_row: dict | None, weights: dict = DEFAULT_WEIGHTS) -> dict:
+    """
+    Fuse one grid cell's per-module rows into a fused score/event.
+
+    Each *_row (if present) is a plain dict with at least "highlight_score";
+    visual_row additionally needs "event_probs" (10-dim), commentary_row and
+    audio_row need "predicted_event"/"event_confidence".
+
+    Returns: {cell_index, fused_event, fused_event_confidence, fused_score,
+              contributions, modules_present, disagreement}
+    """
+    rows_by_module = {"visual": visual_row, "commentary": commentary_row, "audio": audio_row}
+
+    fused_score, contributions, modules_present = _score_contributions(rows_by_module, weights)
+    fused_event, fused_event_confidence = _fused_event(rows_by_module, weights)
+    disagreement = _check_disagreement(rows_by_module)
 
     return {
         "cell_index": cell_index,

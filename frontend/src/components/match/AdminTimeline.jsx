@@ -10,13 +10,6 @@ function eventLabel(event) {
   return EVENT_TYPE_LABELS[event] ?? event
 }
 
-function audioScoreColor(score) {
-  // Low -> muted, high -> bright cyan, matching the module-lane accent color.
-  const s = Math.max(0, Math.min(1, score ?? 0))
-  const lightness = 20 + s * 35
-  return `hsl(190, 80%, ${lightness}%)`
-}
-
 function TimelineTooltipContent({ tooltip }) {
   const { block, laneKey } = tooltip
   return (
@@ -24,9 +17,7 @@ function TimelineTooltipContent({ tooltip }) {
       <p className="font-mono text-text-primary">
         {formatMatchTime(block.start)} → {formatMatchTime(block.end)}
       </p>
-      {laneKey === "audio" ? (
-        <p className="text-text-secondary">Score: {Math.round((block.peakScore ?? 0) * 100)}%</p>
-      ) : laneKey === "disagreement" ? (
+      {laneKey === "disagreement" ? (
         <p className="text-accent-red flex items-center gap-1"><AlertTriangle size={12} /> Modules disagreed here</p>
       ) : (
         <>
@@ -107,15 +98,9 @@ export default function AdminTimeline({ cells = [], duration, onSeek }) {
     cells, (c) => c.contributions?.commentary?.event, (c) => c.contributions?.commentary?.highlight_score,
   )
   const fusedBlocks = mergeAdjacentEvents(cells, (c) => c.fused_event, (c) => c.fused_score)
-
-  const audioBlocks = cells.map((c) => ({
-    event: null,
-    start: c.global_start_sec,
-    end: c.global_end_sec,
-    peakScore: c.contributions?.audio?.highlight_score ?? 0,
-    meanScore: c.contributions?.audio?.highlight_score ?? 0,
-    cellCount: 1,
-  }))
+  const audioBlocks = mergeAdjacentEvents(
+    cells, (c) => c.contributions?.audio?.event, (c) => c.contributions?.audio?.highlight_score,
+  )
 
   const disagreementBlocks = mergeAdjacentEvents(
     cells,
@@ -137,7 +122,7 @@ export default function AdminTimeline({ cells = [], duration, onSeek }) {
         <Lane laneKey="fused" label="Fused" blocks={fusedBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={eventColor} />
         <Lane laneKey="visual" label="Visual" blocks={visualBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={eventColor} />
         <Lane laneKey="commentary" label="Commentary" blocks={commentaryBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={eventColor} />
-        <Lane laneKey="audio" label="Audio" blocks={audioBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={(b) => audioScoreColor(b.peakScore)} />
+        <Lane laneKey="audio" label="Audio" blocks={audioBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={eventColor} />
         {disagreementBlocks.length > 0 && (
           <Lane laneKey="disagreement" label="Disagreement" blocks={disagreementBlocks} totalDuration={duration} onBlockClick={handleBlockClick} onHover={setTooltip} colorFor={() => "#EF4444"} />
         )}
@@ -195,7 +180,9 @@ export default function AdminTimeline({ cells = [], duration, onSeek }) {
               />
               <ModuleDetail
                 label="Audio"
+                event={selectedCell.contributions?.audio?.event}
                 score={selectedCell.contributions?.audio?.highlight_score}
+                confidence={selectedCell.contributions?.audio?.event_confidence}
               />
               <ModuleDetail
                 label="Fused"
