@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     COMMENTARY_LAG_SEC: float = 0.0
     WHISPER_MODEL_SIZE: str = "base"
 
+    # How often the commentary task writes a "still alive" heartbeat to
+    # match.progress while inside its single long Whisper/inference calls
+    # (which have no internal progress callback of their own). Lets the
+    # frontend tell "legitimately slow" apart from "worker died silently".
+    COMMENTARY_HEARTBEAT_SEC: float = 20.0
+
     @property
     def SYNC_DATABASE_URL(self) -> str:
         """Synchronous driver URL for Celery workers."""

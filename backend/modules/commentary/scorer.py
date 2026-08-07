@@ -22,7 +22,9 @@ from modules.commentary.hybrid import predict_chunks
 logger = logging.getLogger(__name__)
 
 
-def analyze_match(audio_path: str, duration_sec: float, lag_sec: float = 0.0) -> dict:
+def analyze_match(
+    audio_path: str, duration_sec: float, lag_sec: float = 0.0, on_stage=None,
+) -> dict:
     """
     Run the full commentary hybrid analysis over one match's audio track.
 
@@ -30,6 +32,12 @@ def analyze_match(audio_path: str, duration_sec: float, lag_sec: float = 0.0) ->
         lag_sec: shift word timestamps earlier by this much before gridding
             (commentators react after the play). Default 0.0 — see
             config.settings.COMMENTARY_LAG_SEC.
+        on_stage: optional callback(stage_name: str), invoked before each
+            major phase ("transcribing" | "loading_model" | "scoring").
+            Whisper/inference are single blocking calls with no fine-grained
+            progress of their own, so this is coarse — enough for the caller
+            to show *something* moved instead of a bare "Running…" for the
+            whole task duration.
 
     Returns:
         {"cells": [{cell_index, global_start_sec, global_end_sec,
@@ -43,6 +51,8 @@ def analyze_match(audio_path: str, duration_sec: float, lag_sec: float = 0.0) ->
             "lexicon.json via the Models admin page (/admin/models) before processing a match."
         )
 
+    if on_stage:
+        on_stage("transcribing")
     words = transcribe_match(audio_path)
     if lag_sec:
         words = [
@@ -52,8 +62,13 @@ def analyze_match(audio_path: str, duration_sec: float, lag_sec: float = 0.0) ->
 
     chunks = build_grid_chunks(words, duration_sec)
 
+    if on_stage:
+        on_stage("loading_model")
     model, tokenizer, id2label, device = weights_io.get_checkpoint()
     lexicon = weights_io.get_lexicon()
+
+    if on_stage:
+        on_stage("scoring")
     predictions = predict_chunks(chunks, model, tokenizer, id2label, lexicon, device)
 
     cells = [
