@@ -77,20 +77,43 @@ function PipelineStepper({ status }) {
 const MODULE_LABELS = { visual: "Visual Analysis", commentary: "Commentary", audio: "Audio Energy" }
 const MODULE_ORDER = ["visual", "commentary", "audio"]
 
-function ModuleProgressRow({ moduleKey, info }) {
+// Coarse phase names written by the commentary task (backend/tasks/tasks.py,
+// modules/commentary/scorer.py) — Whisper transcription and model inference
+// are each one blocking call with no fine-grained progress, so this is the
+// most granular signal available for that module.
+const STAGE_LABELS = {
+  starting: "Starting…",
+  transcribing: "Transcribing audio…",
+  loading_model: "Loading model…",
+  scoring: "Scoring commentary…",
+}
+
+// A module heartbeats every COMMENTARY_HEARTBEAT_SEC (20s, config.py) while
+// running. No update for 3x that means the worker most likely died mid-task
+// (e.g. hit Celery's hard time limit) rather than that it's just slow.
+const STALE_AFTER_MS = 60_000
+
+function ModuleProgressRow({ moduleKey, info, now }) {
   const status = info?.status ?? "pending"
   const done = info?.done
   const total = info?.total
   const pct = done != null && total ? Math.round((done / total) * 100) : null
+  const stage = info?.stage
+  const heartbeatAt = info?.heartbeat_at
+  const isStale =
+    status === "running" && heartbeatAt != null &&
+    now - new Date(heartbeatAt).getTime() > STALE_AFTER_MS
 
   const icon =
     status === "done" ? <CheckCircle size={13} className="text-accent-emerald" />
     : status === "failed" ? <XCircle size={13} className="text-red-400" />
+    : status === "running" && isStale ? <AlertCircle size={13} className="text-amber-400" />
     : status === "running" ? <Loader2 size={13} className="text-accent-indigo animate-spin" />
     : <Circle size={13} className="text-text-muted" />
 
   const statusLabel =
     status === "running" && pct != null ? `${done}/${total} tiles · ${pct}%`
+    : status === "running" && stage ? (STAGE_LABELS[stage] ?? "Running…")
     : status === "running" ? "Running…"
     : status === "done" ? "Complete"
     : status === "failed" ? "Failed"
@@ -102,7 +125,7 @@ function ModuleProgressRow({ moduleKey, info }) {
         <span className="flex items-center gap-2 text-text-secondary font-medium">
           {icon} {MODULE_LABELS[moduleKey] ?? moduleKey}
         </span>
-        <span className={`font-mono ${status === "failed" ? "text-red-400" : "text-text-muted"}`}>
+        <span className={`font-mono ${status === "failed" ? "text-red-400" : isStale ? "text-amber-400" : "text-text-muted"}`}>
           {statusLabel}
         </span>
       </div>
@@ -114,23 +137,28 @@ function ModuleProgressRow({ moduleKey, info }) {
           />
         </div>
       )}
+      {isStale && (
+        <p className="text-[11px] text-amber-400 flex items-center gap-1">
+          <AlertCircle size={11} /> No update for over a minute — this may be stuck.
+        </p>
+      )}
     </div>
   )
 }
 
-function ProcessingProgress({ progress }) {
+function ProcessingProgress({ progress, now }) {
   if (!progress) return null
   return (
     <div className="space-y-3 pt-3 border-t border-border">
       {MODULE_ORDER.map((key) => (
-        <ModuleProgressRow key={key} moduleKey={key} info={progress[key]} />
+        <ModuleProgressRow key={key} moduleKey={key} info={progress[key]} now={now} />
       ))}
     </div>
   )
 }
 
 export default function MatchStatusCard({ matchId, onStatusChange }) {
-  const { data, isLoading, isError } = useMatchPolling(matchId)
+  const { data, dataUpdatedAt, isLoading, isError } = useMatchPolling(matchId)
   const [jobs, setJobs] = useState([])
 
   useEffect(() => {
@@ -187,7 +215,7 @@ export default function MatchStatusCard({ matchId, onStatusChange }) {
 
       <PipelineStepper status={data.status} />
 
-      {data.status === "processing" && <ProcessingProgress progress={data.progress} />}
+      {data.status === "processing" && <ProcessingProgress progress={data.progress} now={dataUpdatedAt} />}
 
       {data.status === "done" && (
         <motion.div

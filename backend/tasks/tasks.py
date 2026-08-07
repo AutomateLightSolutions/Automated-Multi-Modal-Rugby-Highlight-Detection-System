@@ -2,6 +2,8 @@
 Celery task definitions for the video processing pipeline.
 """
 import logging
+import threading
+from datetime import datetime, timezone
 
 from celery import chord
 
@@ -174,6 +176,29 @@ def run_audio_energy_analysis(match_id: str, audio_path: str, duration_sec: floa
     return {"match_id": match_id, "module": "audio", "cells": len(result["cells"])}
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _commentary_heartbeat_loop(match_id: str, stage_ref: dict, stop_event: threading.Event) -> None:
+    """Runs on a background thread for the lifetime of one commentary task,
+    writing a fresh heartbeat_at every COMMENTARY_HEARTBEAT_SEC. Whisper
+    transcription and model inference are each single blocking calls with no
+    progress hooks of their own, so without this a hung/killed worker and a
+    legitimately slow one are indistinguishable from the outside — both just
+    sit at status=="running" forever. Uses its own DB session: sessions
+    aren't thread-safe to share with the main task thread."""
+    hb_session = SyncSessionLocal()
+    try:
+        while not stop_event.wait(settings.COMMENTARY_HEARTBEAT_SEC):
+            sync_update_match_progress(
+                hb_session, match_id, "commentary",
+                status="running", stage=stage_ref["stage"], heartbeat_at=_now_iso(),
+            )
+    finally:
+        hb_session.close()
+
+
 @app.task(name="tasks.tasks.run_commentary_analysis")
 def run_commentary_analysis(match_id: str, audio_path: str, duration_sec: float,
                              lag_sec: float = 0.0) -> dict:
@@ -183,10 +208,26 @@ def run_commentary_analysis(match_id: str, audio_path: str, duration_sec: float,
     from modules.commentary.scorer import analyze_match
 
     session = SyncSessionLocal()
+    stage_ref = {"stage": "starting"}
+    stop_event = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_commentary_heartbeat_loop, args=(match_id, stage_ref, stop_event), daemon=True,
+    )
     try:
-        sync_update_match_progress(session, match_id, "commentary", status="running")
+        started_at = _now_iso()
+        sync_update_match_progress(
+            session, match_id, "commentary",
+            status="running", stage="starting", started_at=started_at, heartbeat_at=started_at,
+        )
+        heartbeat_thread.start()
 
-        result = analyze_match(audio_path, duration_sec, lag_sec=lag_sec)
+        def _on_stage(stage: str) -> None:
+            stage_ref["stage"] = stage
+            sync_update_match_progress(
+                session, match_id, "commentary", status="running", stage=stage, heartbeat_at=_now_iso(),
+            )
+
+        result = analyze_match(audio_path, duration_sec, lag_sec=lag_sec, on_stage=_on_stage)
 
         module_prediction_rows = [
             {
@@ -204,11 +245,14 @@ def run_commentary_analysis(match_id: str, audio_path: str, duration_sec: float,
         sync_bulk_create_module_predictions(session, match_id, "commentary", module_prediction_rows)
         sync_update_match_transcript(session, match_id, result["transcript"])
 
-        sync_update_match_progress(session, match_id, "commentary", status="done")
+        sync_update_match_progress(session, match_id, "commentary", status="done", stage="done")
     except Exception:
-        sync_update_match_progress(session, match_id, "commentary", status="failed")
+        sync_update_match_progress(session, match_id, "commentary", status="failed", stage="failed")
         raise
     finally:
+        stop_event.set()
+        if heartbeat_thread.ident is not None:
+            heartbeat_thread.join(timeout=5)
         session.close()
 
     return {"match_id": match_id, "module": "commentary", "cells": len(result["cells"])}
